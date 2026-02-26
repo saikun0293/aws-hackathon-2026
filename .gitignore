@@ -1,3 +1,6 @@
+# AWS credentials — never commit these
+.aws/
+
 # Compiled class file
 *.class
 
