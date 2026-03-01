@@ -141,3 +141,58 @@ def generate_payment_description(
             f"- **Insurance Covered:** {claim_approved}\n"
             f"- **Patient Payable:** {patient_pays}\n"
         )
+
+
+# ---------------------------------------------------------------------------
+# Embedding generation  (Titan Embed Text v2)
+# ---------------------------------------------------------------------------
+
+EMBEDDING_MODEL_ID: str = os.environ.get(
+    "BEDROCK_EMBEDDING_MODEL_ID",
+    "amazon.titan-embed-text-v2:0",
+)
+
+# Titan Embed v2 max input ≈ 8 192 tokens; safe char ceiling
+_EMBED_MAX_CHARS = 25_000
+
+
+def generate_embedding(text: str) -> list[float]:
+    """
+    Call Amazon Bedrock Titan Embed Text v2 to produce a 1024-dim dense vector.
+
+    Parameters
+    ----------
+    text : combined text string (review + doctor + hospital)
+
+    Returns
+    -------
+    list[float] — 1 024 dimensions, normalised.
+    Returns an empty list on any error so the indexing pipeline is never blocked.
+    """
+    text = text[:_EMBED_MAX_CHARS]
+
+    body_payload = {
+        "inputText":  text,
+        "dimensions": 1024,
+        "normalize":  True,
+    }
+
+    try:
+        response = _bedrock.invoke_model(
+            modelId     = EMBEDDING_MODEL_ID,
+            contentType = "application/json",
+            accept      = "application/json",
+            body        = json.dumps(body_payload),
+        )
+        result: dict = json.loads(response["body"].read())
+        embedding: list[float] = result["embedding"]
+        logger.info(
+            "Embedding generated: %d dims for %d chars of text",
+            len(embedding), len(text),
+        )
+        return embedding
+    except Exception as exc:
+        logger.exception(
+            "Bedrock embedding generation failed, returning empty vector: %s", exc
+        )
+        return []

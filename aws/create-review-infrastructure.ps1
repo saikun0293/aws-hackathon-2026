@@ -44,8 +44,13 @@ param(
     [string] $StateMachineName= "DocumentProcessingWorkflow",
     [string] $BedrockModelId  = "anthropic.claude-3-sonnet-20240229-v1:0",
 
-    [string] $LambdaZipPath   = "$PSScriptRoot\lambda\reviewFunction\reviewFunction.zip",
-    [string] $AslPath         = "$PSScriptRoot\step-functions\document-processing-state-machine.json"
+    [string] $LambdaZipPath       = "$PSScriptRoot\lambda\reviewFunction\reviewFunction.zip",
+    [string] $AslPath             = "$PSScriptRoot\step-functions\document-processing-state-machine.json",
+
+    # OpenSearch
+    [string] $OpenSearchEndpoint  = "",   # e.g. https://search-xxx.us-east-1.es.amazonaws.com
+    [string] $OpenSearchIndex     = "reviews",
+    [string] $OpenSearchSvcName   = "es"  # "es" for managed, "aoss" for serverless
 )
 
 Set-StrictMode -Version Latest
@@ -177,6 +182,18 @@ $inlinePolicy = @"
       "Effect": "Allow",
       "Action": "s3:GeneratePresignedUrl",
       "Resource": "arn:aws:s3:::${S3Bucket}/*"
+    },
+    {
+      "Sid": "OpenSearchIndex",
+      "Effect": "Allow",
+      "Action": ["es:ESHttpPut", "es:ESHttpPost", "es:ESHttpGet"],
+      "Resource": "arn:aws:es:${Region}:${AccountId}:domain/*"
+    },
+    {
+      "Sid": "LambdaSelfInvoke",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:${Region}:${AccountId}:function:${FunctionName}"
     }
   ]
 }
@@ -209,7 +226,7 @@ $lambdaJson = Invoke-CLI "Creating Lambda: $FunctionName" {
         --zip-file       "fileb://$LambdaZipPath" `
         --timeout        300 `
         --memory-size    512 `
-        --environment    "Variables={TABLE_NAME=$TableName,S3_BUCKET=$S3Bucket,BEDROCK_MODEL_ID=$BedrockModelId,STEP_FUNCTION_ARN=PLACEHOLDER}" `
+        --environment    "Variables={TABLE_NAME=$TableName,DOCTOR_TABLE_NAME=Doctor,HOSPITAL_TABLE_NAME=Hospital,S3_BUCKET=$S3Bucket,BEDROCK_MODEL_ID=$BedrockModelId,STEP_FUNCTION_ARN=PLACEHOLDER,FUNCTION_NAME=$FunctionName,OPENSEARCH_ENDPOINT=$OpenSearchEndpoint,OPENSEARCH_INDEX=$OpenSearchIndex,OPENSEARCH_SERVICE_NAME=$OpenSearchSvcName}" `
         --region         $Region `
         --output         json
 }
@@ -245,7 +262,7 @@ Write-Host "  State Machine ARN: $sfArn" -ForegroundColor Green
 Invoke-CLI "Updating Lambda env with STEP_FUNCTION_ARN" {
     aws lambda update-function-configuration `
         --function-name  $FunctionName `
-        --environment    "Variables={TABLE_NAME=$TableName,S3_BUCKET=$S3Bucket,BEDROCK_MODEL_ID=$BedrockModelId,STEP_FUNCTION_ARN=$sfArn}" `
+        --environment    "Variables={TABLE_NAME=$TableName,DOCTOR_TABLE_NAME=Doctor,HOSPITAL_TABLE_NAME=Hospital,S3_BUCKET=$S3Bucket,BEDROCK_MODEL_ID=$BedrockModelId,STEP_FUNCTION_ARN=$sfArn,FUNCTION_NAME=$FunctionName,OPENSEARCH_ENDPOINT=$OpenSearchEndpoint,OPENSEARCH_INDEX=$OpenSearchIndex,OPENSEARCH_SERVICE_NAME=$OpenSearchSvcName}" `
         --region         $Region `
         --output         json
 } | Out-Null

@@ -12,11 +12,17 @@ Routes:
   DELETE /reviews/{reviewId}        → delete_review
 
 Environment variables (required):
-  TABLE_NAME         – DynamoDB table name          (default: "Review")
-  S3_BUCKET          – S3 bucket for documents      (default: "choco-warriors-db-synthetic-data")
-  STEP_FUNCTION_ARN  – ARN of the Synchronous Express Workflow
-  BEDROCK_MODEL_ID   – Bedrock model ID             (default: anthropic.claude-3-sonnet-20240229-v1:0)
-  AWS_REGION         – injected automatically by Lambda runtime
+  TABLE_NAME                 – DynamoDB Review table name     (default: "Review")
+  DOCTOR_TABLE_NAME          – DynamoDB Doctor table name     (default: "Doctor")
+  HOSPITAL_TABLE_NAME        – DynamoDB Hospital table name   (default: "Hospital")
+  S3_BUCKET                  – S3 bucket for documents        (default: "choco-warriors-db-synthetic-data")
+  STEP_FUNCTION_ARN          – ARN of the Sync Express Workflow
+  BEDROCK_MODEL_ID           – Bedrock chat model ID          (default: anthropic.claude-3-sonnet-20240229-v1:0)
+  BEDROCK_EMBEDDING_MODEL_ID – Bedrock embedding model        (default: amazon.titan-embed-text-v2:0)
+  OPENSEARCH_ENDPOINT        – OpenSearch domain endpoint URL (e.g. https://search-xxx.es.amazonaws.com)
+  OPENSEARCH_INDEX           – OpenSearch index name          (default: "reviews")
+  FUNCTION_NAME              – This Lambda's own function name (for async self-invocation)
+  AWS_REGION                 – injected automatically by Lambda runtime
 
 Review schema (DynamoDB)
 ------------------------
@@ -57,18 +63,25 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-TABLE_NAME:        str = os.environ.get("TABLE_NAME",        "Review")
-S3_BUCKET:         str = os.environ.get("S3_BUCKET",         "choco-warriors-db-synthetic-data")
-STEP_FUNCTION_ARN: str = os.environ.get("STEP_FUNCTION_ARN", "")
-PARTITION_KEY:     str = "reviewId"
+TABLE_NAME:          str = os.environ.get("TABLE_NAME",          "Review")
+DOCTOR_TABLE_NAME:   str = os.environ.get("DOCTOR_TABLE_NAME",   "Doctor")
+HOSPITAL_TABLE_NAME: str = os.environ.get("HOSPITAL_TABLE_NAME", "Hospital")
+S3_BUCKET:           str = os.environ.get("S3_BUCKET",           "choco-warriors-db-synthetic-data")
+STEP_FUNCTION_ARN:   str = os.environ.get("STEP_FUNCTION_ARN",   "")
+FUNCTION_NAME:       str = os.environ.get("FUNCTION_NAME",       "reviewFunction")
+PARTITION_KEY:       str = "reviewId"
 
-_dynamodb       = boto3.resource("dynamodb")
-table           = _dynamodb.Table(TABLE_NAME)
-_states_client  = boto3.client("stepfunctions")
+_dynamodb        = boto3.resource("dynamodb")
+table            = _dynamodb.Table(TABLE_NAME)
+_doctor_table    = _dynamodb.Table(DOCTOR_TABLE_NAME)
+_hospital_table  = _dynamodb.Table(HOSPITAL_TABLE_NAME)
+_states_client   = boto3.client("stepfunctions")
+_lambda_client   = boto3.client("lambda")
 
 # Local imports (other files in this Lambda package)
 import document_utils
 import bedrock_utils
+import opensearch_utils
 import rekognition_utils
 import textract_utils
 import comprehend_utils
@@ -241,6 +254,35 @@ def process_document_handler(event: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Background indexing  (async self-invocation after review creation)
+# ---------------------------------------------------------------------------
+
+def _fire_index_review(review_id: str, doctor_id: str, hospital_id: str) -> None:
+    """
+    Asynchronously invoke THIS Lambda with action='index_review'.
+    InvocationType='Event' → fire-and-forget (202, no wait).
+    The caller's POST /reviews response is NOT delayed.
+    """
+    payload = json.dumps({
+        "action":     "index_review",
+        "reviewId":   review_id,
+        "doctorId":   doctor_id,
+        "hospitalId": hospital_id,
+    }).encode()
+
+    try:
+        _lambda_client.invoke(
+            FunctionName   = FUNCTION_NAME,
+            InvocationType = "Event",   # async — caller does not wait
+            Payload        = payload,
+        )
+        logger.info("Fired async index_review for reviewId=%s", review_id)
+    except Exception as exc:
+        # Non-fatal — indexing failure must NEVER block review creation
+        logger.warning("Could not fire async index_review: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # 3. Create review
 # ---------------------------------------------------------------------------
 
@@ -310,6 +352,14 @@ def create_review(event: dict) -> dict:
         return _error(500, "Failed to create review.")
 
     logger.info("Created review %s", review_id)
+
+    # Trigger background OpenSearch indexing (async, user need not wait)
+    _fire_index_review(
+        review_id   = review_id,
+        doctor_id   = body["doctorId"],
+        hospital_id = body["hospitalId"],
+    )
+
     return _ok(item, status_code=201)
 
 
@@ -451,12 +501,75 @@ def _action_extract_medical(event: dict) -> dict:
     }
 
 
+def _action_index_review(event: dict) -> dict:
+    """
+    action: index_review
+    ────────────────────
+    Invoked asynchronously (InvocationType='Event') after a review is created.
+
+    Steps:
+      1. Fetch review, doctor, hospital records from DynamoDB (3 parallel-ish gets)
+      2. Build combinedText → Bedrock Titan Embed v2 → 1 024-dim vector
+      3. PUT combined document into OpenSearch
+
+    Input event keys: reviewId, doctorId, hospitalId
+    """
+    review_id   = event["reviewId"]
+    doctor_id   = event["doctorId"]
+    hospital_id = event["hospitalId"]
+
+    logger.info(
+        "index_review start: reviewId=%s doctorId=%s hospitalId=%s",
+        review_id, doctor_id, hospital_id,
+    )
+
+    # ── 1. Fetch from DynamoDB ─────────────────────────────────────────────
+    review_item: dict[str, Any] = {}
+    try:
+        review_item = table.get_item(Key={"reviewId": review_id}).get("Item") or {}
+    except Exception as exc:
+        logger.exception("Failed to fetch review %s for indexing", review_id)
+        raise
+
+    doctor_item: dict[str, Any] = {}
+    try:
+        doctor_item = _doctor_table.get_item(Key={"doctorId": doctor_id}).get("Item") or {}
+    except Exception as exc:
+        logger.warning("Could not fetch doctor %s: %s", doctor_id, exc)
+
+    hospital_item: dict[str, Any] = {}
+    try:
+        hospital_item = _hospital_table.get_item(Key={"hospitalId": hospital_id}).get("Item") or {}
+    except Exception as exc:
+        logger.warning("Could not fetch hospital %s: %s", hospital_id, exc)
+
+    # ── 2. Generate embedding ──────────────────────────────────────────────
+    combined_text = opensearch_utils._build_combined_text(review_item, doctor_item, hospital_item)
+    embedding     = bedrock_utils.generate_embedding(combined_text)
+
+    # ── 3. Index into OpenSearch ───────────────────────────────────────────
+    result = opensearch_utils.index_review(
+        review_id     = review_id,
+        review_item   = review_item,
+        doctor_item   = doctor_item,
+        hospital_item = hospital_item,
+        embedding     = embedding,
+    )
+
+    logger.info(
+        "index_review complete: reviewId=%s opensearch_result=%s",
+        review_id, result.get("result"),
+    )
+    return {"indexed": True, "reviewId": review_id, "result": result.get("result")}
+
+
 _ACTION_HANDLERS = {
     "rekognition_validate": _action_rekognition_validate,
     "textract_extract":     _action_textract_extract,
     "extract_bill":         _action_extract_bill,
     "extract_claim":        _action_extract_claim,
     "extract_medical":      _action_extract_medical,
+    "index_review":         _action_index_review,
 }
 
 
