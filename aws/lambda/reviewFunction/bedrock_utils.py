@@ -1,13 +1,29 @@
 """
 bedrock_utils.py
 ================
-Wraps Amazon Bedrock (claude-3-sonnet) to generate a structured Markdown
-payment description from bill and procedure data.
+Wraps Amazon Bedrock via the Converse API (boto3 bedrock-runtime.converse).
+
+The Converse API provides a single unified interface for all Bedrock models
+(Amazon Nova, Anthropic Claude, Meta Llama, etc.) so switching models only
+requires changing the BEDROCK_MODEL_ID environment variable.
+
+Default model: amazon.nova-lite-v1:0
+  - Fast, cheap, no AWS Marketplace subscription / payment required.
+  - Set env var BEDROCK_MODEL_ID to switch to any other Bedrock model.
 
 Public API
 ----------
-  generate_payment_description(payment, extracted_data)
-      → str  (Markdown)
+  generate_payment_description(payment, extracted_data, claim, raw_text)
+  generate_text(prompt, max_tokens, label)
+  extract_structured_fields(prompt)
+  generate_embedding(text)
+
+Note on anthropic_version
+-------------------------
+When using invoke_model directly with Anthropic models, the request body MUST
+include "anthropic_version": "bedrock-2023-05-31".  This is a required Anthropic
+API contract field -- NOT the model version.  The Converse API handles this
+automatically so you do NOT need to include it.
 """
 
 from __future__ import annotations
@@ -20,122 +36,271 @@ from typing import Any
 
 import boto3
 
-logger = logging.getLogger(__name__)
+# Use the ROOT logger -- Lambda configures this handler to write to CloudWatch.
+# Module-level loggers (getLogger(__name__)) propagate to root but their level
+# may be NOTSET in some Lambda runtime versions.  Using the root logger directly
+# guarantees every log line appears in /aws/lambda/reviewFunction.
+logger = logging.getLogger()
 
 AWS_REGION: str = os.environ.get("AWS_REGION", "us-east-1")
+
+# Amazon Nova Lite -- no marketplace subscription / payment method required.
+# Override with env var BEDROCK_MODEL_ID to use Claude, Llama, etc.
 BEDROCK_MODEL_ID: str = os.environ.get(
     "BEDROCK_MODEL_ID",
-    "anthropic.claude-3-sonnet-20240229-v1:0",
+    "amazon.nova-lite-v1:0",
+)
+
+EMBEDDING_MODEL_ID: str = os.environ.get(
+    "BEDROCK_EMBEDDING_MODEL_ID",
+    "amazon.titan-embed-text-v2:0",
 )
 
 _bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 
-# ---------------------------------------------------------------------------
-# Prompt template
-# ---------------------------------------------------------------------------
-
-_SYSTEM_PROMPT = (
-    "You are a medical billing assistant. "
-    "Given structured bill and procedure information, produce a concise, "
-    "Markdown-formatted payment summary. "
-    "Use bullet points for the charge breakdown. "
-    "All amounts are in Indian Rupees (₹). "
-    "Do NOT add any commentary outside the summary block. "
-    "Output ONLY the Markdown — no preamble, no disclaimer."
+# Emitted once per cold start -- confirms module loaded and shows region/model.
+logger.info(
+    "[bedrock_utils] module loaded -- region=%s  model=%s  embedding=%s",
+    AWS_REGION, BEDROCK_MODEL_ID, EMBEDDING_MODEL_ID,
 )
 
-_USER_TEMPLATE = """\
-Generate a payment summary section in Markdown using this data:
 
-Procedure: {procedure}
-Surgery / Treatment: {surgery}
-Total Bill Amount: {total_bill}
-Insurance Covered: {claim_approved}
-Patient Payable: {patient_payable}
+# ---------------------------------------------------------------------------
+# Internal: Converse API wrapper
+# ---------------------------------------------------------------------------
 
-Charge breakdown (as available):
-{breakdown}
+def _converse(
+    user_text: str,
+    *,
+    system_text: str | None = None,
+    max_tokens: int = 1024,
+    temperature: float = 0.0,
+    label: str = "converse",
+) -> str:
+    """
+    Invoke any Bedrock model via the Converse API and return the response text.
 
-Format requirements:
-- Start with "## Payment Summary"
-- List each charge as a bold label followed by the amount
-- End with a one-line summary of what the patient owes
-"""
+    The Converse API uses a model-agnostic message format:
+      messages = [{"role": "user", "content": [{"text": "..."}]}]
+    This works identically for Nova, Claude, Llama, Mistral, etc.
+
+    Returns the response text (stripped).  Raises on failure.
+    """
+    messages = [{"role": "user", "content": [{"text": user_text}]}]
+    kwargs: dict[str, Any] = {
+        "modelId":         BEDROCK_MODEL_ID,
+        "messages":        messages,
+        "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature},
+    }
+    if system_text:
+        kwargs["system"] = [{"text": system_text}]
+
+    preview = (user_text[:300] + "...") if len(user_text) > 300 else user_text
+    logger.info(
+        "[bedrock_utils][%s] INVOKING Converse API  model=%s  max_tokens=%d  "
+        "temperature=%s  prompt_len=%d  preview: %.300s",
+        label, BEDROCK_MODEL_ID, max_tokens, temperature, len(user_text), preview,
+    )
+
+    response = _bedrock.converse(**kwargs)
+
+    usage       = response.get("usage", {})
+    stop_reason = response.get("stopReason", "")
+    text        = response["output"]["message"]["content"][0]["text"].strip()
+
+    logger.info(
+        "[bedrock_utils][%s] RESPONSE  stop=%s  in=%s  out=%s  chars=%d  preview: %.300s",
+        label, stop_reason,
+        usage.get("inputTokens", "?"), usage.get("outputTokens", "?"),
+        len(text), text,
+    )
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Public: free-form text generation
+# ---------------------------------------------------------------------------
+
+def generate_text(prompt: str, max_tokens: int = 800, label: str = "generate_text") -> str:
+    """
+    Send a free-form prompt to Bedrock (Converse API) and return the text.
+    Used by bill_extractor / claim_extractor to generate Markdown descriptions
+    directly from Textract raw_text / tables.
+
+    Never raises -- returns an empty string on failure.
+    """
+    logger.info("[bedrock_utils][%s] START  prompt_len=%d", label, len(prompt))
+    try:
+        text = _converse(prompt, max_tokens=max_tokens, temperature=0, label=label)
+        logger.info("[bedrock_utils][%s] SUCCESS  output_len=%d", label, len(text))
+        return text
+    except Exception as exc:
+        logger.error(
+            "[bedrock_utils][%s] FAILED -- %s: %s",
+            label, type(exc).__name__, exc,
+        )
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Public: structured JSON field extraction
+# ---------------------------------------------------------------------------
+
+def extract_structured_fields(prompt: str) -> dict[str, Any]:
+    """
+    Send a structured extraction prompt to Bedrock (Converse API) and return
+    the parsed JSON dict.
+
+    temperature=0 for deterministic, schema-constrained output.
+    Never raises -- returns {} on any failure.
+    """
+    logger.info("[bedrock_utils][extract_fields] START  prompt_len=%d", len(prompt))
+    raw_text = "(no response yet)"
+    try:
+        raw_text = _converse(prompt, max_tokens=1024, temperature=0, label="extract_fields")
+
+        # Strip markdown code fences that Nova/Claude may wrap around JSON
+        clean = re.sub(r"^```(?:json)?\n?", "", raw_text)
+        clean = re.sub(r"\n?```$",          "", clean).strip()
+
+        logger.info(
+            "[bedrock_utils][extract_fields] Parsing JSON  clean_len=%d  preview: %.300s",
+            len(clean), clean,
+        )
+        result = json.loads(clean)
+        logger.info(
+            "[bedrock_utils][extract_fields] SUCCESS  field_count=%d  fields=%s",
+            len(result), list(result.keys()),
+        )
+        return result
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "[bedrock_utils][extract_fields] JSON PARSE FAILED -- %s  raw: %.500s",
+            exc, raw_text,
+        )
+        return {}
+    except Exception as exc:
+        logger.error(
+            "[bedrock_utils][extract_fields] INVOCATION FAILED -- %s: %s",
+            type(exc).__name__, exc,
+        )
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Public: payment description (Markdown)
+# ---------------------------------------------------------------------------
+
+_BILLING_SYSTEM = (
+    "You are a medical billing assistant. "
+    "Produce a concise Markdown payment summary from the information provided. "
+    "All amounts are in Indian Rupees. "
+    "Output ONLY the Markdown -- no preamble, no disclaimer."
+)
 
 
 def generate_payment_description(
     payment: dict[str, Any],
     extracted_data: dict[str, Any],
     claim: dict[str, Any] | None = None,
+    raw_text: str = "",
 ) -> str:
     """
-    Call Bedrock Claude-3-Sonnet to generate a Markdown payment description.
+    Return a Markdown payment description.
+
+    Priority (best to worst):
+      1. bill_extractor already set payment["description"] -- return it directly.
+      2. raw_text provided -- pass to Claude/Nova so it can see every charge line.
+      3. Fallback -- build a simple text block from already-extracted field values.
 
     Parameters
     ----------
-    payment        : dict with at least totalBillAmount, amountToBePayed
-    extracted_data : dict with surgeryType, procedureDate, diagnosis, …
-    claim          : optional dict with claimAmountApproved
-
-    Returns
-    -------
-    Markdown string for payment.description  (falls back to a plain summary
-    on Bedrock errors so the review submission is never blocked).
+    payment        : dict, may contain 'description' from bill_extractor
+    extracted_data : dict with surgeryType, diagnosis, etc.
+    claim          : optional dict with claimAmountApproved, etc.
+    raw_text       : raw OCR text from the bill (preferred input to AI)
     """
-    procedure     = extracted_data.get("diagnosis", "Medical Procedure")
-    surgery       = extracted_data.get("surgeryType", "Treatment")
-    total_bill    = payment.get("totalBillAmount", "N/A")
-    patient_pays  = payment.get("amountToBePayed", "N/A")
-    claim_approved = claim.get("claimAmountApproved", "N/A") if claim else "N/A"
-
-    # Try to build a breakdown from key_values if the bill extractor passed them
-    breakdown_lines = []
-    for label, key in [
-        ("Hospital Charges",       "hospitalCharges"),
-        ("Doctor Fees",            "doctorFees"),
-        ("Medicines & Consumables","medicines"),
-        ("Lab & Diagnostics",      "labDiagnostics"),
-        ("Room Charges",           "roomCharges"),
-        ("Miscellaneous",          "miscellaneous"),
-    ]:
-        val = payment.get(key)
-        if val:
-            breakdown_lines.append(f"- {label}: {val}")
-
-    if not breakdown_lines:
-        breakdown_lines.append("(Itemised breakdown not available)")
-
-    user_prompt = _USER_TEMPLATE.format(
-        procedure     = procedure,
-        surgery       = surgery,
-        total_bill    = total_bill,
-        claim_approved= claim_approved,
-        patient_payable = patient_pays,
-        breakdown     = "\n".join(breakdown_lines),
+    logger.info(
+        "[bedrock_utils][payment_desc] START  has_prebuilt=%s  raw_text_len=%d  "
+        "payment_keys=%s  claim_present=%s",
+        bool(payment.get("description")), len(raw_text),
+        list(payment.keys()), bool(claim),
     )
 
-    body_payload = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 600,
-        "system": _SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": user_prompt}],
-    }
-
-    try:
-        response = _bedrock.invoke_model(
-            modelId     = BEDROCK_MODEL_ID,
-            contentType = "application/json",
-            accept      = "application/json",
-            body        = json.dumps(body_payload),
+    # Priority 1
+    if payment.get("description"):
+        logger.info(
+            "[bedrock_utils][payment_desc] Using pre-built description (%d chars)",
+            len(payment["description"]),
         )
-        result = json.loads(response["body"].read())
-        text = result["content"][0]["text"].strip()
-        logger.info("Bedrock payment description generated (%d chars)", len(text))
-        return text
+        return payment["description"]
+
+    # Priority 2: pass raw_text directly
+    if raw_text.strip():
+        extra_ctx = ""
+        if claim:
+            extra_ctx = (
+                "\n\nInsurance/Claim context:\n"
+                f"  Claim ID              : {claim.get('claimId', 'N/A')}\n"
+                f"  Original Bill Amount  : {claim.get('originalBillAmount', 'N/A')}\n"
+                f"  Insurer Approved      : {claim.get('claimAmountApproved', 'N/A')}\n"
+                f"  Patient Out-of-Pocket : {claim.get('remainingAmountToBePaid', 'N/A')}"
+            )
+        raw_prompt = (
+            "Generate a payment summary section in Markdown from this hospital bill text.\n\n"
+            f"HOSPITAL BILL RAW TEXT:\n{raw_text}{extra_ctx}\n\n"
+            "Format requirements:\n"
+            "- Start with '## Payment Summary'\n"
+            "- Include Bill No, hospital name, patient name, dates if present\n"
+            "- List each charge line as: **Charge Name**: amount\n"
+            "- Show Sub Total, GST/Tax, and Grand Total prominently\n"
+            "- If insurance info is present, show disbursed vs patient payable\n"
+            "- End with bold: '**Total patient payable: X**'\n"
+            "- Do NOT invent numbers not present in the text"
+        )
+        logger.info(
+            "[bedrock_utils][payment_desc] Sending raw_text to Bedrock  "
+            "raw_text_len=%d  prompt_len=%d",
+            len(raw_text), len(raw_prompt),
+        )
+        result = generate_text(raw_prompt, max_tokens=700, label="payment_desc_raw")
+        if result:
+            logger.info(
+                "[bedrock_utils][payment_desc] raw_text path SUCCESS  output_len=%d",
+                len(result),
+            )
+            return result
+        logger.warning("[bedrock_utils][payment_desc] raw_text path returned empty, falling back")
+
+    # Priority 3: structured fallback
+    logger.info("[bedrock_utils][payment_desc] Using structured-fields fallback")
+    procedure      = extracted_data.get("diagnosis", "Medical Procedure")
+    surgery        = extracted_data.get("surgeryType", "Treatment")
+    total_bill     = payment.get("totalBillAmount", "N/A")
+    patient_pays   = payment.get("amountToBePayed", "N/A")
+    claim_approved = claim.get("claimAmountApproved", "N/A") if claim else "N/A"
+
+    user_prompt = (
+        "Generate a payment summary in Markdown using this data:\n\n"
+        f"Procedure: {procedure}\n"
+        f"Surgery / Treatment: {surgery}\n"
+        f"Total Bill Amount: {total_bill}\n"
+        f"Insurance Covered: {claim_approved}\n"
+        f"Patient Payable: {patient_pays}\n\n"
+        "Format: start with '## Payment Summary', list each item, end with patient payable."
+    )
+    try:
+        return _converse(
+            user_prompt, system_text=_BILLING_SYSTEM,
+            max_tokens=600, label="payment_desc_fallback",
+        )
     except Exception as exc:
-        logger.exception("Bedrock call failed, falling back to plain summary: %s", exc)
+        logger.error(
+            "[bedrock_utils][payment_desc_fallback] FAILED -- %s: %s",
+            type(exc).__name__, exc,
+        )
         return (
-            f"## Payment Summary\n\n"
+            "## Payment Summary\n\n"
             f"- **Procedure:** {procedure}\n"
             f"- **Surgery/Treatment:** {surgery}\n"
             f"- **Total Bill Amount:** {total_bill}\n"
@@ -145,57 +310,10 @@ def generate_payment_description(
 
 
 # ---------------------------------------------------------------------------
-# Structured field extraction  (semantic, document-type-agnostic)
+# Public: embedding generation  (Titan Embed Text v2 via invoke_model)
+# Titan Embed does NOT support the Converse API -- must use invoke_model.
 # ---------------------------------------------------------------------------
 
-def extract_structured_fields(prompt: str) -> dict[str, Any]:
-    """
-    Send a structured extraction prompt to Claude and return the parsed JSON.
-
-    temperature=0 for deterministic, schema-constrained output.
-    Never raises — returns {} on any failure so callers can handle gracefully.
-    """
-    body_payload = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 1024,
-        "temperature": 0,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    try:
-        response = _bedrock.invoke_model(
-            modelId     = BEDROCK_MODEL_ID,
-            contentType = "application/json",
-            accept      = "application/json",
-            body        = json.dumps(body_payload),
-        )
-        content = json.loads(response["body"].read())
-        text    = content["content"][0]["text"].strip()
-
-        # Strip markdown code fences that Claude sometimes adds
-        text = re.sub(r"^```(?:json)?\n?", "", text)
-        text = re.sub(r"\n?```$",          "", text)
-
-        result = json.loads(text)
-        logger.info("Structured extraction returned %d fields", len(result))
-        return result
-    except json.JSONDecodeError as exc:
-        logger.warning("Claude returned non-JSON for structured extraction: %s", exc)
-        return {}
-    except Exception as exc:
-        logger.exception("Bedrock structured extraction failed: %s", exc)
-        return {}
-
-
-# ---------------------------------------------------------------------------
-# Embedding generation  (Titan Embed Text v2)
-# ---------------------------------------------------------------------------
-
-EMBEDDING_MODEL_ID: str = os.environ.get(
-    "BEDROCK_EMBEDDING_MODEL_ID",
-    "amazon.titan-embed-text-v2:0",
-)
-
-# Titan Embed v2 max input ≈ 8 192 tokens; safe char ceiling
 _EMBED_MAX_CHARS = 25_000
 
 
@@ -203,23 +321,19 @@ def generate_embedding(text: str) -> list[float]:
     """
     Call Amazon Bedrock Titan Embed Text v2 to produce a 1024-dim dense vector.
 
-    Parameters
-    ----------
-    text : combined text string (review + doctor + hospital)
-
-    Returns
-    -------
-    list[float] — 1 024 dimensions, normalised.
-    Returns an empty list on any error so the indexing pipeline is never blocked.
+    Returns [] on any error so the indexing pipeline is never blocked.
     """
     text = text[:_EMBED_MAX_CHARS]
-
     body_payload = {
         "inputText":  text,
         "dimensions": 1024,
         "normalize":  True,
     }
 
+    logger.info(
+        "[bedrock_utils][embedding] INVOKING invoke_model  model=%s  input_chars=%d",
+        EMBEDDING_MODEL_ID, len(text),
+    )
     try:
         response = _bedrock.invoke_model(
             modelId     = EMBEDDING_MODEL_ID,
@@ -230,12 +344,13 @@ def generate_embedding(text: str) -> list[float]:
         result: dict = json.loads(response["body"].read())
         embedding: list[float] = result["embedding"]
         logger.info(
-            "Embedding generated: %d dims for %d chars of text",
+            "[bedrock_utils][embedding] SUCCESS  dims=%d  input_chars=%d",
             len(embedding), len(text),
         )
         return embedding
     except Exception as exc:
-        logger.exception(
-            "Bedrock embedding generation failed, returning empty vector: %s", exc
+        logger.error(
+            "[bedrock_utils][embedding] FAILED -- %s: %s",
+            type(exc).__name__, exc,
         )
         return []

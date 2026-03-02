@@ -67,7 +67,7 @@ TABLE_NAME:          str = os.environ.get("TABLE_NAME",          "Review")
 DOCTOR_TABLE_NAME:   str = os.environ.get("DOCTOR_TABLE_NAME",   "Doctor")
 HOSPITAL_TABLE_NAME: str = os.environ.get("HOSPITAL_TABLE_NAME", "Hospital")
 S3_BUCKET:           str = os.environ.get("S3_BUCKET",           "choco-warriors-db-synthetic-data-us")
-STEP_FUNCTION_ARN:   str = os.environ.get("STEP_FUNCTION_ARN",   "arn:aws:states:us-east-1:582027981081:stateMachine:DocumentProcessingWorkflow")
+STEP_FUNCTION_ARN:   str = os.environ.get("STEP_FUNCTION_ARN",   "arn:aws:states:us-east-1:582027981081:stateMachine:DocumentProcessingWorkflowUS")
 FUNCTION_NAME:       str = os.environ.get("FUNCTION_NAME",       "reviewFunction")
 PARTITION_KEY:       str = "reviewId"
 
@@ -105,7 +105,7 @@ def _response(status_code: int, body: Any) -> dict:
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
         },
-        "body": json.dumps(body, cls=DecimalEncoder),
+        "body": json.dumps(body, cls=DecimalEncoder, ensure_ascii=False),
     }
 
 
@@ -456,7 +456,11 @@ def _action_extract_bill(event: dict) -> dict:
 
 
 def _action_extract_claim(event: dict) -> dict:
-    """action: extract_claim — Textract → Bedrock Claude → insurance claim fields."""
+    """action: extract_claim — Textract -> Bedrock Claude -> insurance claim fields.
+
+    Returns both the claim sub-object AND a payment patch so the caller can
+    update payment.amountToBePayed with the patient's true out-of-pocket cost.
+    """
     textract_result = {
         "raw_text":   event.get("raw_text", ""),
         "key_values": event.get("key_values", {}),
@@ -466,11 +470,20 @@ def _action_extract_claim(event: dict) -> dict:
     return {
         "valid": True,
         "claim": claim,
+        # The claim document authoritatively tells us what the patient owes;
+        # surface it so the front-end / state-machine can patch payment too.
+        "payment": {
+            "amountToBePayed": claim.get("remainingAmountToBePaid", ""),
+        },
     }
 
 
 def _action_extract_medical(event: dict) -> dict:
-    """action: extract_medical — Comprehend Medical → extractedData fields."""
+    """action: extract_medical — Comprehend Medical + Bedrock -> extractedData fields.
+
+    Also surfaces purposeOfVisit when the medical record contains it,
+    so the front-end can pre-fill that field for the user to confirm.
+    """
     textract_result = {
         "raw_text":   event.get("raw_text", ""),
         "key_values": event.get("key_values", {}),
@@ -479,10 +492,16 @@ def _action_extract_medical(event: dict) -> dict:
     cm_result  = comprehend_medical_utils.analyze_medical_text(textract_result["raw_text"])
     extracted  = medical_extractor.extract_medical_data(textract_result, cm_result)
     confidence = extracted.get("confidence", 0.0)
+
+    # purposeOfVisit lives at review root level, not inside extractedData
+    purpose_of_visit = extracted.pop("purposeOfVisit", "")
+
     return {
-        "valid":         True,
-        "confidence":    confidence,
-        "extractedData": extracted,
+        "valid":           True,
+        "confidence":      confidence,
+        "extractedData":   extracted,
+        # Returned separately so the front-end can pre-fill the purposeOfVisit field
+        "purposeOfVisit":  purpose_of_visit,
     }
 
 

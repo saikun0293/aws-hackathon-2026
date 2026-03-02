@@ -4,16 +4,20 @@ extractors/medical_extractor.py
 Maps Amazon Comprehend Medical entity output into the extractedData{}
 sub-object expected by the Review DynamoDB record.
 
+Also uses Bedrock to extract purposeOfVisit from the raw medical record
+text when it can be identified (Comprehend Medical does not surface it).
+
 Output schema
 -------------
 {
-  "hospitalName":  str,
-  "doctorName":    str,
-  "surgeryType":   str,
-  "procedureDate": str,   # YYYY-MM-DD when parseable
-  "diagnosis":     str,
-  "medications":   list[str],
-  "confidence":    float,  # mean entity score
+  "hospitalName":    str,
+  "doctorName":      str,
+  "surgeryType":     str,
+  "procedureDate":   str,   # YYYY-MM-DD when parseable
+  "diagnosis":       str,
+  "medications":     list[str],
+  "confidence":      float,  # mean entity score
+  "purposeOfVisit":  str,   # extracted by Bedrock; empty string if not found
 }
 """
 
@@ -23,6 +27,8 @@ import logging
 import re
 from statistics import mean
 from typing import Any
+
+import bedrock_utils
 
 logger = logging.getLogger(__name__)
 
@@ -127,14 +133,32 @@ def extract_medical_data(
     diagnosis = "; ".join(diagnosis_parts) if diagnosis_parts else ""
     confidence = round(mean(scores), 4) if scores else 0.0
 
+    # ---- Bedrock: extract purposeOfVisit from raw medical record text ----
+    purpose_of_visit = ""
+    if raw_text:
+        pov_prompt = (
+            "You are a medical record parser. "
+            "From the text below, extract the PRIMARY purpose or reason for this hospital visit / admission. "
+            "This is typically labelled as: Purpose of Visit, Reason for Admission, Chief Complaint, "
+            "Presenting Complaint, Indication, or Referral Reason. "
+            "Return ONLY the short phrase (5-20 words). "
+            "If not present, return an empty string.\n\n"
+            f"MEDICAL RECORD TEXT:\n{raw_text[:4000]}"
+        )
+        purpose_of_visit = bedrock_utils.generate_text(pov_prompt, max_tokens=80).strip()
+        # Strip any wrapping quotes Claude sometimes adds
+        purpose_of_visit = purpose_of_visit.strip('"\'')
+        logger.info("Extracted purposeOfVisit: %s", purpose_of_visit)
+
     result = {
-        "hospitalName":  hospital_name,
-        "doctorName":    doctor_name,
-        "surgeryType":   surgery_type,
-        "procedureDate": procedure_date,
-        "diagnosis":     diagnosis,
-        "medications":   medications,
-        "confidence":    confidence,
+        "hospitalName":   hospital_name,
+        "doctorName":     doctor_name,
+        "surgeryType":    surgery_type,
+        "procedureDate":  procedure_date,
+        "diagnosis":      diagnosis,
+        "medications":    medications,
+        "confidence":     confidence,
+        "purposeOfVisit": purpose_of_visit,
     }
 
     logger.info("Extracted medical data: %s", result)
