@@ -6,10 +6,12 @@ import {
   Mail,
   Smartphone,
   CheckCircle2,
-  Image
+  Image,
+  AlertTriangle
 } from "lucide-react"
 import { motion } from "motion/react"
 import { FileUploadWithVerification } from "../FileUploadWithVerification"
+import { validateInsuranceClaim } from "../../services/reviewApi"
 import type { DocumentValidationResult } from "../../services/reviewApi"
 
 const API_BASE_URL: string =
@@ -433,6 +435,7 @@ export function Step2Insurance({ data, onUpdate, onNext, onBack }: Step2Props) {
                 description="Upload screenshots, emails, SMS, or documents proving your insurance claim"
                 accept="image/*,.pdf"
                 multiple={true}
+                validateFn={validateInsuranceClaim}
                 onVerificationComplete={handleClaimVerification}
               />
 
