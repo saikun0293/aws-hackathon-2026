@@ -3,6 +3,7 @@ import { Upload, CheckCircle, XCircle, Loader, FileText } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   validateDocument,
+  deleteDocument,
   DocumentValidationResult
 } from "../services/reviewApi"
 
@@ -104,6 +105,11 @@ export function FileUploadWithVerification({
   }
 
   const removeFile = (index: number) => {
+    const fileStatus = files[index]
+    // If the file was already uploaded to S3, delete it there too
+    if (fileStatus?.result?.documentId) {
+      deleteDocument(fileStatus.result.documentId)
+    }
     setFiles((prev) => prev.filter((_, i) => i !== index))
   }
 

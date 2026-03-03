@@ -84,6 +84,37 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function apiDelete<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error((err as any).error ?? `HTTP ${res.status}`)
+  }
+  return res.json() as Promise<T>
+}
+
+/**
+ * Delete a previously-uploaded document from S3.
+ * documentId == s3Key returned by the presign endpoint.
+ * Silently succeeds if the object no longer exists.
+ */
+export async function deleteDocument(documentId: string): Promise<void> {
+  try {
+    await apiDelete<any>("/reviews/documents", { documentId })
+    console.log(`[Document API] Deleted document from S3: ${documentId}`)
+  } catch (err: any) {
+    // Log but don't rethrow – a failed S3 delete shouldn't block the UI
+    console.warn(
+      `[Document API] Failed to delete document '${documentId}' from S3: ${err.message}`
+    )
+  }
+}
+
 /**
  * Upload a file directly to S3 via a pre-signed PUT URL.
  * Returns the s3Key (= documentId) for use in subsequent API calls.
