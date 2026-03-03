@@ -1,0 +1,11 @@
+{
+  "name": "get_doctors_by_specialization",
+  "description": "Find doctors specialized in a particular medical field. Use this when users ask for specific types of doctors or specialists (e.g., 'find cardiologists', 'show me orthopedic surgeons', 'neurologists in Hyderabad'). Returns comprehensive doctor profiles with ratings, experience (5-30 years), qualifications (MBBS, MD, DM, MCh, etc.), hospital affiliations, and detailed biographies sorted by rating descending.",
+  "parameters": {
+    "specialization": {
+      "description": "Department name with 'Department of' prefix. Examples: 'Department of Cardiology' (heart), 'Department of Orthopedics' (bones), 'Department of Neurology' (brain/nerves), 'Department of Oncology' (cancer), 'Department of Gastroenterology' (digestive), 'Department of Nephrology' (kidney), 'Department of Pulmonology' (lungs), 'Department of General Surgery', 'Department of Pediatrics' (children), 'Department of Dermatology' (skin), 'Department of Ophthalmology' (eyes)",
+      "type": "string",
+      "required": true
+    }
+  }
+}

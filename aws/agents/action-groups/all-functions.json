@@ -1,0 +1,126 @@
+[
+  {
+    "name": "get_all_insurance_companies",
+    "description": "Get list of all insurance companies with their IDs and names. ALWAYS call this FIRST when user mentions insurance by name (e.g., 'Star Health', 'ICICI Lombard') to find the insuranceCompanyId, then use get_hospitals_by_insurance with that ID. Returns all available insurance providers in the system.",
+    "parameters": {}
+  },
+  {
+    "name": "get_hospitals_by_affordability",
+    "description": "Find hospitals within an affordability score range. Affordability score ranges from 0.0 (most expensive) to 1.0 (most affordable). Use this when users ask for affordable, cheap, budget-friendly, or economical hospitals. Returns hospitals with ratings, costs, and insurance information.",
+    "parameters": {
+      "min_affordability": {
+        "description": "Minimum affordability score. Use 0.7 for 'very affordable', 0.6 for 'affordable', 0.5 for 'moderate'. Range: 0.0 to 1.0",
+        "type": "number",
+        "required": true
+      },
+      "max_affordability": {
+        "description": "Maximum affordability score. Typically set to 1.0 to include all hospitals above the minimum threshold. Range: 0.0 to 1.0",
+        "type": "number",
+        "required": true
+      }
+    }
+  },
+  {
+    "name": "get_hospitals_by_insurance_name",
+    "description": "Find hospitals that accept a specific insurance company by NAME. Use this when user mentions insurance company name directly (e.g., 'Star Health', 'ICICI Lombard', 'HDFC ERGO'). Valid insurance names: Aditya Birla Health Insurance Company Ltd., Bajaj Allianz General Insurance Company Ltd., Care Health Insurance, Cholamandalam MS General Insurance Co. Ltd., HDFC ERGO General Insurance Company Ltd., ICICI Lombard General Insurance Company Ltd., Niva Bupa Health Insurance Company Ltd., SBI General Insurance Company Ltd., Star Health and Allied Insurance Co. Ltd., TATA AIG General Insurance Company Ltd.",
+    "parameters": {
+      "insurance_name": {
+        "description": "Exact insurance company name. Must be one of: 'Aditya Birla Health Insurance Company Ltd.', 'Bajaj Allianz General Insurance Company Ltd.', 'Care Health Insurance', 'Cholamandalam MS General Insurance Co. Ltd.', 'HDFC ERGO General Insurance Company Ltd.', 'ICICI Lombard General Insurance Company Ltd.', 'Niva Bupa Health Insurance Company Ltd.', 'SBI General Insurance Company Ltd.', 'Star Health and Allied Insurance Co. Ltd.', 'TATA AIG General Insurance Company Ltd.'",
+        "type": "string",
+        "required": true
+      }
+    }
+  },
+  {
+    "name": "get_hospitals_by_insurance",
+    "description": "Find hospitals that accept a specific insurance company ID. DEPRECATED: Use get_hospitals_by_insurance_name instead when user mentions insurance by name. This function requires exact insuranceCompanyId from get_all_insurance_companies response.",
+    "parameters": {
+      "insurance_company_id": {
+        "description": "Insurance company identifier obtained from get_all_insurance_companies. Format: 'insurancecomp_[random_id]'. Do NOT guess the ID - always call get_all_insurance_companies first to get the correct ID.",
+        "type": "string",
+        "required": true
+      }
+    }
+  },
+  {
+    "name": "get_hospitals_high_insurance_coverage",
+    "description": "Find hospitals with high insurance claim approval rates. Use this when users ask for insurance-friendly hospitals, good coverage, reliable insurance processing, or high claim approval. Returns hospitals sorted by approval rate with claim statistics.",
+    "parameters": {
+      "min_approval_rate": {
+        "description": "Minimum claim approval rate. Use 0.9 for 'excellent coverage', 0.85 for 'very good coverage', 0.8 for 'good coverage'. Default is 0.8 (80%). Range: 0.0 to 1.0",
+        "type": "number",
+        "required": false
+      }
+    }
+  },
+  {
+    "name": "get_hospitals_top_doctors_in_dept",
+    "description": "Find hospitals with highly-rated doctors in a specific medical department. Returns hospital details AND complete doctor information (name, rating, experience, qualifications, bio) for each top-rated doctor. Use this when users ask for top doctors, best specialists, or mention specialties. Department name must include 'Department of' prefix. Available departments: Cardiology, Neurology, Orthopedics, Gastroenterology, Nephrology, Oncology, Pulmonology, General Surgery, Emergency Care, ICU, Urology, Neurosurgery, Pediatrics, Obstetrics and Gynecology, Dermatology, Ophthalmology, ENT, Psychiatry, Endocrinology, Rheumatology.",
+    "parameters": {
+      "department_name": {
+        "description": "Full department name with 'Department of' prefix. Examples: 'Department of Cardiology', 'Department of Orthopedics', 'Department of Neurology', 'Department of Oncology', 'Department of Gastroenterology', 'Department of Nephrology', 'Department of Pulmonology', 'Department of General Surgery', 'Department of Urology', 'Department of Neurosurgery', 'Department of Pediatrics', 'Department of Dermatology', 'Department of Ophthalmology', 'Department of ENT (Ear, Nose, Throat)'",
+        "type": "string",
+        "required": true
+      },
+      "min_rating": {
+        "description": "Minimum doctor rating. Use 4.5 for 'best/top/excellent doctors', 4.0 for 'good/quality doctors', 3.5 for 'experienced doctors'. Default is 4.0. Range: 0.0 to 5.0",
+        "type": "number",
+        "required": false
+      }
+    }
+  },
+  {
+    "name": "get_hospitals_by_surgery_cost",
+    "description": "Find hospitals where surgery/treatment costs fall within a specified range. Use this when users mention budget amounts, cost ranges, or price limits. Supports three modes: less than (max_cost only), greater than (min_cost only), or between (both parameters). Costs are in Indian Rupees. Returns hospitals sorted by average cost ascending.",
+    "parameters": {
+      "min_cost": {
+        "description": "Minimum cost threshold in Indian Rupees. Use this alone for 'costs more than X' or 'above X budget' queries. Use with max_cost for 'between X and Y' queries. Optional parameter.",
+        "type": "number",
+        "required": false
+      },
+      "max_cost": {
+        "description": "Maximum cost threshold in Indian Rupees. Use this alone for 'costs less than X' or 'under X budget' or 'below X' queries. Use with min_cost for 'between X and Y' queries. Optional parameter.",
+        "type": "number",
+        "required": false
+      }
+    }
+  },
+  {
+    "name": "get_doctors_by_specialization",
+    "description": "Find doctors specialized in a particular medical field. Use this when users ask for specific types of doctors or specialists (e.g., 'find cardiologists', 'show me orthopedic surgeons', 'neurologists in Hyderabad'). Returns comprehensive doctor profiles with ratings, experience (5-30 years), qualifications (MBBS, MD, DM, MCh, etc.), hospital affiliations, and detailed biographies sorted by rating descending.",
+    "parameters": {
+      "specialization": {
+        "description": "Department name with 'Department of' prefix. Examples: 'Department of Cardiology' (heart), 'Department of Orthopedics' (bones), 'Department of Neurology' (brain/nerves), 'Department of Oncology' (cancer), 'Department of Gastroenterology' (digestive), 'Department of Nephrology' (kidney), 'Department of Pulmonology' (lungs), 'Department of General Surgery', 'Department of Pediatrics' (children), 'Department of Dermatology' (skin), 'Department of Ophthalmology' (eyes)",
+        "type": "string",
+        "required": true
+      }
+    }
+  },
+  {
+    "name": "get_hospital_id_by_name",
+    "description": "Get hospitalId given a hospital name. Use this when you need to resolve a hospital name to its ID for JSON responses. Supports partial name matching (case-insensitive). Returns hospitalId and hospitalName for matching hospitals. Use this to get the exact hospitalId needed for final JSON output.",
+    "parameters": {
+      "hospital_name": {
+        "description": "Hospital name or partial name to search for. Case-insensitive partial matching supported. Examples: 'Apollo', 'Yashoda', 'Continental', 'KIMS'",
+        "type": "string",
+        "required": true
+      }
+    }
+  },
+  {
+    "name": "get_doctor_id_by_name",
+    "description": "Get doctorId and details given doctor name and/or doctorId. Use this when you need to resolve a doctor name to their ID for JSON responses, or to get details for a specific doctorId. Supports partial name matching (case-insensitive). Returns doctorId, doctorName, rating, hospitalName, and hospitalId. Accepts either doctor_name OR doctor_id (or both).",
+    "parameters": {
+      "doctor_name": {
+        "description": "Doctor name or partial name to search for. Case-insensitive partial matching supported. Examples: 'Dr. Rajesh', 'Kumar', 'Sharma'. Optional if doctor_id is provided.",
+        "type": "string",
+        "required": false
+      },
+      "doctor_id": {
+        "description": "Exact doctor ID to look up. Format: 'department_hospital_..._doctor_...'. Optional if doctor_name is provided.",
+        "type": "string",
+        "required": false
+      }
+    }
+  }
+]

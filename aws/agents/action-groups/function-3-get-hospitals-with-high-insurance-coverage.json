@@ -1,0 +1,11 @@
+{
+  "name": "get_hospitals_high_insurance_coverage",
+  "description": "Find hospitals with high insurance claim approval rates. Use this when users ask for insurance-friendly hospitals, good coverage, reliable insurance processing, or high claim approval. Returns hospitals sorted by approval rate with claim statistics.",
+  "parameters": {
+    "min_approval_rate": {
+      "description": "Minimum claim approval rate. Use 0.9 for 'excellent coverage', 0.85 for 'very good coverage', 0.8 for 'good coverage'. Default is 0.8 (80%). Range: 0.0 to 1.0",
+      "type": "number",
+      "required": false
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "operation": "get_doctors_by_specialization",
+  "parameters": {
+    "specialization": "Department of Cardiology"
+  }
+}

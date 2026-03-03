@@ -1,0 +1,16 @@
+{
+  "name": "get_hospitals_by_affordability",
+  "description": "Find hospitals within an affordability score range. Affordability score ranges from 0.0 (most expensive) to 1.0 (most affordable). Use this when users ask for affordable, cheap, budget-friendly, or economical hospitals. Returns hospitals with ratings, costs, and insurance information.",
+  "parameters": {
+    "min_affordability": {
+      "description": "Minimum affordability score. Use 0.7 for 'very affordable', 0.6 for 'affordable', 0.5 for 'moderate'. Range: 0.0 to 1.0",
+      "type": "number",
+      "required": true
+    },
+    "max_affordability": {
+      "description": "Maximum affordability score. Typically set to 1.0 to include all hospitals above the minimum threshold. Range: 0.0 to 1.0",
+      "type": "number",
+      "required": true
+    }
+  }
+}

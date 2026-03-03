@@ -1,0 +1,7 @@
+{
+  "operation": "get_hospitals_by_affordability",
+  "parameters": {
+    "min_affordability": 0.6,
+    "max_affordability": 1.0
+  }
+}

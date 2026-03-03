@@ -1,0 +1,16 @@
+{
+  "name": "get_hospitals_top_doctors_in_dept",
+  "description": "Find hospitals with highly-rated doctors in a specific medical department. Returns hospital details AND complete doctor information (name, rating, experience, qualifications, bio) for each top-rated doctor. Use this when users ask for top doctors, best specialists, or mention specialties. Department name must include 'Department of' prefix. Available departments: Cardiology, Neurology, Orthopedics, Gastroenterology, Nephrology, Oncology, Pulmonology, General Surgery, Emergency Care, ICU, Urology, Neurosurgery, Pediatrics, Obstetrics and Gynecology, Dermatology, Ophthalmology, ENT, Psychiatry, Endocrinology, Rheumatology.",
+  "parameters": {
+    "department_name": {
+      "description": "Full department name with 'Department of' prefix. Examples: 'Department of Cardiology', 'Department of Orthopedics', 'Department of Neurology', 'Department of Oncology', 'Department of Gastroenterology', 'Department of Nephrology', 'Department of Pulmonology', 'Department of General Surgery', 'Department of Urology', 'Department of Neurosurgery', 'Department of Pediatrics', 'Department of Dermatology', 'Department of Ophthalmology', 'Department of ENT (Ear, Nose, Throat)'",
+      "type": "string",
+      "required": true
+    },
+    "min_rating": {
+      "description": "Minimum doctor rating. Use 4.5 for 'best/top/excellent doctors', 4.0 for 'good/quality doctors', 3.5 for 'experienced doctors'. Default is 4.0. Range: 0.0 to 5.0",
+      "type": "number",
+      "required": false
+    }
+  }
+}

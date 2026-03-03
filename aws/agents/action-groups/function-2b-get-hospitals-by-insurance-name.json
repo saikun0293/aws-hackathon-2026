@@ -1,0 +1,11 @@
+{
+  "name": "get_hospitals_by_insurance_name",
+  "description": "Find hospitals that accept a specific insurance company by NAME. Use this when user mentions insurance company name directly (e.g., 'Star Health', 'ICICI Lombard', 'HDFC ERGO'). This function automatically looks up the insurance company ID and returns matching hospitals. Valid insurance names: Aditya Birla Health Insurance Company Ltd., Bajaj Allianz General Insurance Company Ltd., Care Health Insurance, Cholamandalam MS General Insurance Co. Ltd., HDFC ERGO General Insurance Company Ltd., ICICI Lombard General Insurance Company Ltd., Niva Bupa Health Insurance Company Ltd., SBI General Insurance Company Ltd., Star Health and Allied Insurance Co. Ltd., TATA AIG General Insurance Company Ltd.",
+  "parameters": {
+    "insurance_name": {
+      "description": "Exact insurance company name. Must be one of: 'Aditya Birla Health Insurance Company Ltd.', 'Bajaj Allianz General Insurance Company Ltd.', 'Care Health Insurance', 'Cholamandalam MS General Insurance Co. Ltd.', 'HDFC ERGO General Insurance Company Ltd.', 'ICICI Lombard General Insurance Company Ltd.', 'Niva Bupa Health Insurance Company Ltd.', 'SBI General Insurance Company Ltd.', 'Star Health and Allied Insurance Co. Ltd.', 'TATA AIG General Insurance Company Ltd.'",
+      "type": "string",
+      "required": true
+    }
+  }
+}

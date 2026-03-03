@@ -1,0 +1,16 @@
+{
+  "name": "get_doctor_id_by_name",
+  "description": "Get doctorId and details given doctor name and/or doctorId. Use this when you need to resolve a doctor name to their ID for JSON responses, or to get complete details for a specific doctorId. Supports partial name matching (case-insensitive). Returns doctorId, doctorName, rating, hospitalName, and hospitalId (max 5 results sorted by rating). Accepts either doctor_name OR doctor_id (or both for validation). Essential for getting the exact doctorId needed for final JSON output to the user.",
+  "parameters": {
+    "doctor_name": {
+      "description": "Doctor name or partial name to search for. Case-insensitive partial matching supported. Examples: 'Dr. Rajesh', 'Kumar', 'Sharma', 'Priya'. Optional if doctor_id is provided.",
+      "type": "string",
+      "required": false
+    },
+    "doctor_id": {
+      "description": "Exact doctor ID to look up. Format: 'department_hospital_..._doctor_...'. Use this to get complete details for a known doctorId. Optional if doctor_name is provided.",
+      "type": "string",
+      "required": false
+    }
+  }
+}
