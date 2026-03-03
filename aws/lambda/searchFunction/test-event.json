@@ -1,0 +1,15 @@
+{
+  "httpMethod": "POST",
+  "path": "/search",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"query\":\"affordable hospital for lung disease with good doctors and staff\",\"customerId\":\"customer_test_001\",\"userContext\":{\"insuranceId\":\"ins_001\",\"location\":{\"latitude\":28.6139,\"longitude\":77.2090}}}",
+  "requestContext": {
+    "requestId": "test-request-123",
+    "http": {
+      "method": "POST",
+      "path": "/search"
+    }
+  }
+}

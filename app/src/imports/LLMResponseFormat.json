@@ -1,0 +1,45 @@
+{
+    "aiSummary": "Based on your needs, I recommend these affordable hospitals for lung disease treatment with good doctors and staff. Care Women & Children Hospital and Medwin Hospital both have experienced doctors and modern facilities. Mahavir Hospital and Star Hospitals, Banjara Hills also offer quality care at reasonable prices.",
+    "hospitals": [
+        {
+            "hospitalId": "hospital_care_women_children_hospital_500034",
+            "hospitalAIReview": "Patients praise Dr. Santoshi Pattnaik for her expertise in obstetric emergencies and maternal critical care. The hospital is known for its patient-centric and family-friendly healthcare approach. The affordability score is 1.0, and the average cost is ₹243,167.",
+            "doctors": [
+                {
+                    "doctorId": "department_hospital_care_doctor_santoshi_pattnaik",
+                    "doctorAIReview": "Dr. Pattnaik is highly regarded for her expertise in obstetric emergencies and maternal critical care. Patients appreciate her patient-centric and family-friendly approach."
+                }
+            ]
+        },
+        {
+            "hospitalId": "hospital_medwin_hospital_500035",
+            "hospitalAIReview": "Patients commend Dr. Priya Mehta for her expertise in respiratory medicine and critical care. The hospital is equipped with modern diagnostic and therapeutic facilities. The affordability score is 0.97, and the average cost is ₹234,670.",
+            "doctors": [
+                {
+                    "doctorId": "department_hospital_medwin_doctor_priya_mehta",
+                    "doctorAIReview": "Dr. Mehta is highly regarded for her expertise in respiratory medicine and critical care. Patients appreciate the hospital's modern diagnostic and therapeutic facilities."
+                }
+            ]
+        },
+        {
+            "hospitalId": "hospital_mahavir_hospital_500036",
+            "hospitalAIReview": "Patients appreciate Dr. Anil Reddy Gundabathina for his expertise in cardio-pulmonary critical care. The hospital is known for its affordable yet quality healthcare delivery. The affordability score is 0.89, and the average cost is ₹277,074.",
+            "doctors": [
+                {
+                    "doctorId": "department_hospital_mahavir_doctor_anil_reddy_gundabathina",
+                    "doctorAIReview": "Dr. Gundabathina is highly regarded for his expertise in cardio-pulmonary critical care. Patients appreciate the hospital's affordable yet quality healthcare delivery."
+                }
+            ]
+        },
+        {
+            "hospitalId": "hospital_star_hospitals_banjara_hills_500034",
+            "hospitalAIReview": "Patients commend Dr. Vikram Singh Yadav for his expertise in occupational lung diseases and pulmonary rehabilitation. The hospital is equipped with modern diagnostic and therapeutic infrastructure. The affordability score is 0.82, and the average cost is not available.",
+            "doctors": [
+                {
+                    "doctorId": "department_hospital_star_doctor_vikram_singh_yadav",
+                    "doctorAIReview": "Dr. Yadav is highly regarded for his expertise in occupational lung diseases and pulmonary rehabilitation. Patients appreciate the hospital's modern diagnostic and therapeutic infrastructure."
+                }
+            ]
+        }
+    ]
+}

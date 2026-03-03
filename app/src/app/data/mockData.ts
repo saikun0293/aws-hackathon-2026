@@ -40,6 +40,11 @@ export interface Hospital {
     min: number;
     max: number;
   };
+  // Additional fields from Lambda response
+  trustScore?: number;
+  verificationBadge?: string;
+  claimApprovalRate?: number;
+  insuranceCoveragePercent?: number;
 }
 
 export const mockHospitals: Hospital[] = [
