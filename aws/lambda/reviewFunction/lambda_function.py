@@ -407,6 +407,19 @@ def get_review(event: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def list_reviews(event: dict) -> dict:
+    """
+    GET /reviews
+    Returns a paginated list of reviews with optional filtering.
+    Query params:
+      limit      – max items per page (default 20, max 100)
+      lastKey    – opaque pagination token returned by a previous call
+      customerId – filter by customer ID
+      hospitalId – filter by hospital ID
+      doctorId   – filter by doctor ID
+      policyId   – filter by insurance policy ID
+    
+    Multiple filters can be combined (AND logic).
+    """
     query_params = event.get("queryStringParameters") or {}
     try:
         limit = min(int(query_params.get("limit", 20)), 100)
@@ -421,11 +434,34 @@ def list_reviews(event: dict) -> dict:
         except (json.JSONDecodeError, TypeError):
             return _error(400, "Invalid lastKey token.")
 
-    # Optional filter by customerId
+    # Build filter expressions for multiple optional filters
+    filter_expressions = []
+    expr_values: dict[str, str] = {}
+
     customer_id = query_params.get("customerId")
     if customer_id:
-        scan_kwargs["FilterExpression"] = "customerId = :cid"
-        scan_kwargs["ExpressionAttributeValues"] = {":cid": customer_id}
+        filter_expressions.append("customerId = :cid")
+        expr_values[":cid"] = customer_id
+
+    hospital_id = query_params.get("hospitalId")
+    if hospital_id:
+        filter_expressions.append("hospitalId = :hid")
+        expr_values[":hid"] = hospital_id
+
+    doctor_id = query_params.get("doctorId")
+    if doctor_id:
+        filter_expressions.append("doctorId = :did")
+        expr_values[":did"] = doctor_id
+
+    policy_id = query_params.get("policyId")
+    if policy_id:
+        filter_expressions.append("policyId = :pid")
+        expr_values[":pid"] = policy_id
+
+    # Apply filters if any exist
+    if filter_expressions:
+        scan_kwargs["FilterExpression"] = " AND ".join(filter_expressions)
+        scan_kwargs["ExpressionAttributeValues"] = expr_values
 
     try:
         result = table.scan(**scan_kwargs)

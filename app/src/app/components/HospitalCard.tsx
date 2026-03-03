@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
-import { MapPin, Star, DollarSign, Shield, ChevronRight } from "lucide-react";
+import { MapPin, Star, DollarSign, Shield, ChevronRight, Award, CheckCircle } from "lucide-react";
 import { Hospital } from "../data/mockData";
 import ReactMarkdown from "react-markdown";
 
@@ -27,9 +27,22 @@ export function HospitalCard({ hospital, onHover }: HospitalCardProps) {
     ? hospital.reviews.reduce((acc, r) => acc + r.rating, 0) / hospital.reviews.length
     : hospital.rating;
 
-  const totalCost = hospital.reviews.reduce((acc, r) => acc + r.cost, 0);
-  const totalInsurance = hospital.reviews.reduce((acc, r) => acc + r.insuranceCovered, 0);
-  const insuranceCoveragePercent = totalCost > 0 ? Math.round((totalInsurance / totalCost) * 100) : 0;
+  // Use insuranceCoveragePercent from Lambda if available, otherwise calculate from reviews
+  const insuranceCoveragePercent = hospital.insuranceCoveragePercent !== undefined
+    ? hospital.insuranceCoveragePercent
+    : (() => {
+        const totalCost = hospital.reviews.reduce((acc, r) => acc + r.cost, 0);
+        const totalInsurance = hospital.reviews.reduce((acc, r) => acc + r.insuranceCovered, 0);
+        return totalCost > 0 ? Math.round((totalInsurance / totalCost) * 100) : 85;
+      })();
+
+  // Trust badge color mapping
+  const badgeColors = {
+    platinum: "bg-purple-100 text-purple-700 border-purple-300",
+    gold: "bg-yellow-100 text-yellow-700 border-yellow-300",
+    silver: "bg-gray-100 text-gray-700 border-gray-300",
+    bronze: "bg-orange-100 text-orange-700 border-orange-300",
+  };
 
   return (
     <motion.div
@@ -51,7 +64,16 @@ export function HospitalCard({ hospital, onHover }: HospitalCardProps) {
               className="w-16 h-16 rounded-lg object-cover"
             />
             <div className="flex-1">
-              <h3 className="font-semibold text-lg mb-1">{hospital.name}</h3>
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="font-semibold text-lg">{hospital.name}</h3>
+                {hospital.verificationBadge && (
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium border ${
+                    badgeColors[hospital.verificationBadge as keyof typeof badgeColors] || badgeColors.bronze
+                  }`}>
+                    {hospital.verificationBadge.toUpperCase()}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-1 text-sm text-gray-600 mb-2">
                 <MapPin className="w-4 h-4" />
                 <span>{hospital.location}</span>
@@ -59,9 +81,15 @@ export function HospitalCard({ hospital, onHover }: HospitalCardProps) {
               <div className="flex items-center gap-4 text-sm">
                 <div className="flex items-center gap-1">
                   <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                  <span className="font-medium">{hospital.rating}</span>
+                  <span className="font-medium">{hospital.rating.toFixed(1)}</span>
                   <span className="text-gray-500">({hospital.reviewCount} reviews)</span>
                 </div>
+                {hospital.trustScore && (
+                  <div className="flex items-center gap-1 text-green-600">
+                    <CheckCircle className="w-4 h-4" />
+                    <span className="font-medium">Trust: {hospital.trustScore}%</span>
+                  </div>
+                )}
               </div>
             </div>
             <ChevronRight className={`w-5 h-5 text-gray-400 transition-transform ${isHovered ? "translate-x-1" : ""}`} />
