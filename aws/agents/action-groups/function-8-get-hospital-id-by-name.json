@@ -1,0 +1,11 @@
+{
+  "name": "get_hospital_id_by_name",
+  "description": "Get hospitalId given a hospital name. Use this when you need to resolve a hospital name to its ID for JSON responses. Supports partial name matching (case-insensitive). Returns hospitalId and hospitalName for matching hospitals (max 5 results). Essential for getting the exact hospitalId needed for final JSON output to the user.",
+  "parameters": {
+    "hospital_name": {
+      "description": "Hospital name or partial name to search for. Case-insensitive partial matching supported. Examples: 'Apollo', 'Yashoda', 'Continental', 'KIMS', 'Sunshine', 'Care', 'Rainbow'",
+      "type": "string",
+      "required": true
+    }
+  }
+}

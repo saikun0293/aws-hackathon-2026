@@ -1,0 +1,74 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Hospital Search API - Get All Insurance Companies",
+    "version": "1.0.0",
+    "description": "Retrieves all insurance companies to help identify insurance company IDs for hospital searches"
+  },
+  "paths": {
+    "/get_all_insurance_companies": {
+      "post": {
+        "summary": "Get all insurance companies",
+        "description": "Returns list of all insurance companies with IDs and names. Use this FIRST when user mentions insurance by name to find the insuranceCompanyId, then use get_hospitals_by_insurance with that ID.",
+        "operationId": "get_all_insurance_companies",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "description": "Must be 'get_all_insurance_companies'",
+                    "enum": ["get_all_insurance_companies"]
+                  },
+                  "parameters": {
+                    "type": "object",
+                    "description": "Empty object - no parameters needed",
+                    "properties": {}
+                  }
+                },
+                "required": ["operation", "parameters"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of insurance companies with IDs and names",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "insuranceCompanyId": {
+                            "type": "string"
+                          },
+                          "insuranceCompanyName": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

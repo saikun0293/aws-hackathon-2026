@@ -1,0 +1,16 @@
+{
+  "name": "get_hospitals_by_insurance",
+  "description": "Find hospitals that accept a specific insurance company. Use insurance_name parameter (simpler) instead of insurance_company_id. Supports Star Health, ICICI Lombard, HDFC ERGO, Max Bupa, Care Health, Bajaj Allianz, Religare, Aditya Birla, Niva Bupa, and Manipal Cigna.",
+  "parameters": {
+    "insurance_name": {
+      "description": "Name of the insurance company (e.g., 'Star Health', 'ICICI Lombard', 'HDFC ERGO'). The function will automatically look up the ID. This is the PREFERRED parameter.",
+      "type": "string",
+      "required": false
+    },
+    "insurance_company_id": {
+      "description": "Insurance company identifier (legacy parameter). Use insurance_name instead for simpler queries. Valid values: 'insurance_company_star_health', 'insurance_company_icici_lombard', etc.",
+      "type": "string",
+      "required": false
+    }
+  }
+}

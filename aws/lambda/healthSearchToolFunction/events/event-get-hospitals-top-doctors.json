@@ -1,0 +1,7 @@
+{
+  "operation": "get_hospitals_with_top_doctors_in_department",
+  "parameters": {
+    "department_name": "Department of Cardiology",
+    "min_rating": 4.5
+  }
+}

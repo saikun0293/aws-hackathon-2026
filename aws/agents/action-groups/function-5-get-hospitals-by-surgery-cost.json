@@ -1,0 +1,16 @@
+{
+  "name": "get_hospitals_by_surgery_cost",
+  "description": "Find hospitals where surgery/treatment costs fall within a specified range. Use this when users mention budget amounts, cost ranges, or price limits. Supports three modes: less than (max_cost only), greater than (min_cost only), or between (both parameters). Costs are in Indian Rupees. Returns hospitals sorted by average cost ascending.",
+  "parameters": {
+    "min_cost": {
+      "description": "Minimum cost threshold in Indian Rupees. Use this alone for 'costs more than X' or 'above X budget' queries. Use with max_cost for 'between X and Y' queries. Optional parameter.",
+      "type": "number",
+      "required": false
+    },
+    "max_cost": {
+      "description": "Maximum cost threshold in Indian Rupees. Use this alone for 'costs less than X' or 'under X budget' or 'below X' queries. Use with min_cost for 'between X and Y' queries. Optional parameter.",
+      "type": "number",
+      "required": false
+    }
+  }
+}

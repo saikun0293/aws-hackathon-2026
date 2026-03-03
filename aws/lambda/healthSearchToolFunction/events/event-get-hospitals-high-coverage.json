@@ -1,0 +1,6 @@
+{
+  "operation": "get_hospitals_with_high_insurance_coverage",
+  "parameters": {
+    "min_approval_rate": 0.85
+  }
+}

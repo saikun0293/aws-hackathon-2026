@@ -1,0 +1,6 @@
+{
+  "operation": "get_hospitals_by_surgery_cost",
+  "parameters": {
+    "max_cost": 50000
+  }
+}
