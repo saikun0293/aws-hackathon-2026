@@ -156,17 +156,45 @@ def invoke_bedrock_agent(query: str, customer_id: str) -> dict:
             inputText=query,
         )
         
-        # Collect response from EventStream
+        # Properly handle streaming response - collect ALL chunks
         full_response = ""
         chunk_count = 0
         
-        for event in response.get("completion", []):
+        # Process all events in the completion stream
+        # CRITICAL: Must iterate through ALL events to get complete response
+        completion_stream = response.get("completion", [])
+        
+        for event in completion_stream:
+            # Log event type for debugging
+            event_type = list(event.keys())[0] if event else "unknown"
+            logger.debug("Event received | Type=%s", event_type)
+            
             if "chunk" in event:
                 chunk = event["chunk"]
                 if "bytes" in chunk:
+                    # Decode bytes and append to full response
                     chunk_data = chunk["bytes"].decode("utf-8")
                     full_response += chunk_data
                     chunk_count += 1
+                    logger.debug("Chunk %d received | Length=%d | Content=%s", 
+                                chunk_count, len(chunk_data), chunk_data[:100])
+            
+            # Handle other event types that might contain data
+            elif "trace" in event:
+                logger.debug("Trace event received")
+            elif "returnControl" in event:
+                logger.debug("ReturnControl event received")
+            elif "internalServerException" in event:
+                logger.error("InternalServerException in stream")
+                raise Exception("Bedrock Agent internal server error")
+            elif "validationException" in event:
+                logger.error("ValidationException in stream")
+                raise Exception("Bedrock Agent validation error")
+        
+        # Ensure we received some response
+        if not full_response:
+            logger.error("No response received from Bedrock Agent | ChunkCount=%d", chunk_count)
+            raise Exception("Empty response from Bedrock Agent")
         
         elapsed = time.time() - start_time
         logger.info(
@@ -175,6 +203,11 @@ def invoke_bedrock_agent(query: str, customer_id: str) -> dict:
             len(full_response),
             elapsed
         )
+        
+        # Log full response for debugging (truncated to 3000 chars)
+        logger.info("Full Agent response (first 3000 chars): %s", full_response[:3000])
+        if len(full_response) > 3000:
+            logger.info("Full Agent response (last 500 chars): %s", full_response[-500:])
         
         # Parse JSON response - extract JSON from conversational text
         try:
@@ -192,6 +225,16 @@ def invoke_bedrock_agent(query: str, customer_id: str) -> dict:
                 prefix = full_response[:json_start].strip()
                 logger.info("Stripped conversational prefix | Prefix='%s'", prefix[:100])
             
+            # Check if JSON is complete (ends with '}')
+            json_str_stripped = json_str.strip()
+            if not json_str_stripped.endswith('}'):
+                logger.warning("JSON appears incomplete | Ends with: '%s'", json_str_stripped[-50:])
+                # Try to find the last complete JSON object
+                last_brace = json_str_stripped.rfind('}')
+                if last_brace > 0:
+                    json_str = json_str_stripped[:last_brace + 1]
+                    logger.info("Truncated to last complete brace | NewLength=%d", len(json_str))
+            
             llm_data = json.loads(json_str)
             logger.info(
                 "LLM response parsed | Hospitals=%d | HasSummary=%s",
@@ -201,6 +244,7 @@ def invoke_bedrock_agent(query: str, customer_id: str) -> dict:
             return llm_data
         except json.JSONDecodeError as e:
             logger.error("Failed to parse LLM response as JSON | Error=%s | Response=%s", str(e), full_response[:500])
+            logger.error("JSON string that failed to parse (last 500 chars): %s", json_str[-500:] if len(json_str) > 500 else json_str)
             raise ValueError(f"Invalid JSON response from Bedrock Agent: {str(e)}")
     
     except ClientError as e:
@@ -757,7 +801,9 @@ def search_hospitals(event: dict) -> dict:
         llm_doctor_ids = []
         for h in hospitals_llm:
             for d in h.get("doctors", []):
-                llm_doctor_ids.append(d["doctorId"])
+                doctor_id = d["doctorId"]
+                llm_doctor_ids.append(doctor_id)
+                logger.info("Extracted doctor ID from LLM | DoctorId=%s | HospitalId=%s", doctor_id, h["hospitalId"])
         
         logger.info(
             "IDs extracted | Hospitals=%d | LLM-recommended Doctors=%d",
@@ -830,6 +876,14 @@ def search_hospitals(event: dict) -> dict:
                         resource_id,
                         str(e)
                     )
+                    # Log additional details for doctor fetch failures
+                    if task_type == "doctor":
+                        logger.error(
+                            "Doctor fetch failed - check if doctor exists in DynamoDB | DoctorId=%s | URL=%s/doctors/%s",
+                            resource_id,
+                            API_GATEWAY_BASE_URL,
+                            resource_id
+                        )
         
         logger.info(
             "Data fetching complete | Hospitals=%d | Doctors=%d | HospitalReviews=%d | DoctorReviews=%d",
@@ -879,8 +933,13 @@ def search_hospitals(event: dict) -> dict:
                         doctor_reviews_list
                     )
                     top_doctors.append(enriched_doctor)
+                    logger.info("Doctor enriched successfully | DoctorId=%s | HospitalId=%s", doctor_id, hospital_id)
                 else:
-                    logger.warning("Doctor data not found | DoctorId=%s", doctor_id)
+                    logger.warning(
+                        "Doctor data not found - skipping | DoctorId=%s | HospitalId=%s | Reason=API fetch failed or returned 404",
+                        doctor_id,
+                        hospital_id
+                    )
             
             enriched_hospital["topDoctors"] = top_doctors
             
