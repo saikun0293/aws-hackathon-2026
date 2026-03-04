@@ -218,6 +218,17 @@ def combine_review_data(review):
         ' '.join(hospital_services) if isinstance(hospital_services, list) else ''
     ]))
     
+    # Append metadata section to reviewText so Agent can extract IDs
+    metadata_section = f"""
+
+---METADATA---
+hospitalId: {review.get('hospitalId', '')}
+doctorId: {review.get('doctorId', '')}
+reviewId: {review.get('reviewId', '')}
+verified: {review.get('verified', False)}
+"""
+    review_text = review_text + metadata_section
+    
     # Build reviewIndex - searchable metadata for quick lookups
     review_index = ' '.join(filter(None, [
         review.get('reviewId', ''),
