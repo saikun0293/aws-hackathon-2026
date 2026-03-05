@@ -7,20 +7,17 @@ import ReactMarkdown from "react-markdown";
 
 interface HospitalCardProps {
   hospital: Hospital;
-  onHover: (hospital: Hospital | null) => void;
 }
 
-export function HospitalCard({ hospital, onHover }: HospitalCardProps) {
+export function HospitalCard({ hospital }: HospitalCardProps) {
   const [isHovered, setIsHovered] = useState(false);
 
   const handleMouseEnter = () => {
     setIsHovered(true);
-    onHover(hospital);
   };
 
   const handleMouseLeave = () => {
     setIsHovered(false);
-    onHover(null);
   };
 
   const averageRating = hospital.reviews.length > 0
