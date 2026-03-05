@@ -16,3 +16,17 @@ applications:
       cache:
         paths:
           - node_modules/**/*
+    customHeaders:
+      - pattern: '**/*'
+        headers:
+          - key: 'Strict-Transport-Security'
+            value: 'max-age=31536000; includeSubDomains'
+          - key: 'X-Content-Type-Options'
+            value: 'nosniff'
+          - key: 'X-Frame-Options'
+            value: 'DENY'
+    # SPA fallback - redirect all routes to index.html
+    rewrites:
+      - source: '</^[^.]+$|\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|woff2|ttf|map|json)$)([^.]+$)/>'
+        target: '/index.html'
+        status: '200'
