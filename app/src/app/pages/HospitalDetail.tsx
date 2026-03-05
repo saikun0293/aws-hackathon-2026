@@ -123,7 +123,7 @@ export function HospitalDetail() {
                     <span>Cost Range</span>
                   </div>
                   <p className="text-lg font-semibold">
-                    ${(hospital.avgCostRange.min / 1000).toFixed(0)}k - $
+                    ₹{(hospital.avgCostRange.min / 1000).toFixed(0)}k - ₹
                     {(hospital.avgCostRange.max / 1000).toFixed(0)}k
                   </p>
                 </div>
@@ -228,18 +228,18 @@ export function HospitalDetail() {
                     <div className="flex gap-4 text-sm">
                       <div className="bg-gray-50 px-3 py-2 rounded">
                         <span className="text-gray-600">Total Cost: </span>
-                        <span className="font-semibold">${review.cost.toLocaleString()}</span>
+                        <span className="font-semibold">₹{review.cost.toLocaleString()}</span>
                       </div>
                       <div className="bg-green-50 px-3 py-2 rounded">
                         <span className="text-gray-600">Insurance Covered: </span>
                         <span className="font-semibold text-green-700">
-                          ${review.insuranceCovered.toLocaleString()}
+                          ₹{review.insuranceCovered.toLocaleString()}
                         </span>
                       </div>
                       <div className="bg-blue-50 px-3 py-2 rounded">
                         <span className="text-gray-600">Out of Pocket: </span>
                         <span className="font-semibold text-blue-700">
-                          ${(review.cost - review.insuranceCovered).toLocaleString()}
+                          ₹{(review.cost - review.insuranceCovered).toLocaleString()}
                         </span>
                       </div>
                     </div>

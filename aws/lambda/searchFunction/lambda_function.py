@@ -424,7 +424,7 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
     Args:
         hospital_llm: Hospital data from LLM
         hospital_data: Hospital data from API
-        reviews: Hospital reviews
+        reviews: Hospital reviews from API
         insurance_id: User's insurance ID (optional)
     
     Returns:
@@ -454,6 +454,29 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
     # Extract doctor IDs from LLM response
     top_doctor_ids = [d["doctorId"] for d in hospital_llm.get("doctors", [])]
     
+    # Format reviews for UI
+    formatted_reviews = []
+    for review in reviews[:2]:  # Only first 2 reviews
+        try:
+            payment = review.get("payment", {})
+            claim = review.get("claim", {})
+            
+            formatted_review = {
+                "id": review.get("reviewId", ""),
+                "patientName": review.get("customerName", "Anonymous"),
+                "rating": review.get("overallRating", 4),
+                "date": review.get("createdAt", "")[:10] if review.get("createdAt") else "",  # Extract date part
+                "treatment": review.get("procedureType", "General Treatment"),
+                "cost": int(payment.get("totalBillAmount", 0)) if payment.get("totalBillAmount") else 0,
+                "insuranceCovered": int(claim.get("claimAmountApproved", 0)) if claim.get("claimAmountApproved") else 0,
+                "comment": review.get("hospitalReview", ""),
+                "verified": review.get("verified", False)
+            }
+            formatted_reviews.append(formatted_review)
+        except Exception as e:
+            logger.warning("Failed to format review | ReviewId=%s | Error=%s", review.get("reviewId"), str(e))
+            continue
+    
     return {
         "id": hospital_id,
         "name": hospital_data.get("hospitalName", ""),
@@ -471,7 +494,7 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
         "trustScore": 85,  # Default
         "verificationBadge": "gold",  # Default
         "aiRecommendation": hospital_llm.get("hospitalAIReview", ""),
-        "reviews": reviews[:2],  # First 2 reviews
+        "reviews": formatted_reviews,  # Formatted reviews for UI
         "doctors": [],  # Empty - will be lazy loaded
         "topDoctorIds": top_doctor_ids,  # For lazy loading
         "acceptedInsurance": ["Blue Cross", "United Health", "Aetna", "Medicare"]  # Default
