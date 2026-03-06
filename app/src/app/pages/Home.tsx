@@ -35,6 +35,10 @@ export function Home() {
     try {
       // Call the search API
       const { hospitals, searchId } = await searchHospitalsAPI(searchQuery);
+      console.log("[Home] Search results received:", hospitals.length, "hospitals");
+      console.log("[Home] First hospital data:", hospitals[0]);
+      console.log("[Home] First hospital coordinates:", hospitals[0]?.coordinates);
+      console.log("[Home] First hospital distance:", hospitals[0]?.distance);
       setSearchResults(hospitals);
       // Store in global context so detail page can access
       setGlobalSearchResults(hospitals);

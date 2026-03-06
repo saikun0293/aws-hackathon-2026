@@ -575,9 +575,16 @@ export function HospitalDetail() {
                     </div>
                   )}
                   
-                  <button className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2">
+                  <button 
+                    onClick={() => {
+                      // The map already shows the direction between two points!
+                      // Just show a helpful message
+                      alert(`The map above shows the route from your location to ${hospital.name}\n\nDistance: ${hospital.distance?.toFixed(1)} km\nEstimated Time: ${hospital.distance ? Math.ceil(hospital.distance / 0.5) : 'N/A'} min`);
+                    }}
+                    className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
+                  >
                     <Navigation className="w-4 h-4" />
-                    Get Directions
+                    View Route Info
                   </button>
                 </motion.div>
               )}
