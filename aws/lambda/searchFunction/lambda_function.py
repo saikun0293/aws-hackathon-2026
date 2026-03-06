@@ -430,6 +430,27 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
     Returns:
         dict: Enriched hospital object
     """
+    
+    def clean_currency_value(value) -> int:
+        """
+        Clean currency value by removing symbols and converting to int.
+        Handles: ₹427123, $1000, 1000, "₹427123", etc.
+        """
+        if value is None:
+            return 0
+        
+        # Convert to string if not already
+        value_str = str(value)
+        
+        # Remove currency symbols and whitespace
+        cleaned = value_str.replace("₹", "").replace("$", "").replace(",", "").strip()
+        
+        # Try to convert to int
+        try:
+            return int(float(cleaned))
+        except (ValueError, TypeError):
+            return 0
+    
     hospital_id = hospital_data.get("hospitalId")
     
     # Parse services
@@ -467,8 +488,8 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
                 "rating": review.get("overallRating", 4),
                 "date": review.get("createdAt", "")[:10] if review.get("createdAt") else "",  # Extract date part
                 "treatment": review.get("procedureType", "General Treatment"),
-                "cost": int(payment.get("totalBillAmount", 0)) if payment.get("totalBillAmount") else 0,
-                "insuranceCovered": int(claim.get("claimAmountApproved", 0)) if claim.get("claimAmountApproved") else 0,
+                "cost": clean_currency_value(payment.get("totalBillAmount")),
+                "insuranceCovered": clean_currency_value(claim.get("claimAmountApproved")),
                 "comment": review.get("hospitalReview", ""),
                 "verified": review.get("verified", False)
             }
@@ -566,13 +587,16 @@ def fetch_reviews(query_params: dict) -> list:
     Returns:
         list: Review items
     """
-    # Extract limit if provided, default to 100
-    limit = query_params.pop("limit", 100)
+    # Make a copy to avoid modifying the original dict
+    params = query_params.copy()
     
-    params_str = "&".join([f"{k}={v}" for k, v in query_params.items()])
+    # Extract limit if provided, default to 100
+    limit = params.pop("limit", 100)
+    
+    params_str = "&".join([f"{k}={v}" for k, v in params.items()])
     url = f"{API_GATEWAY_BASE_URL}/reviews?{params_str}&limit={limit}"
     
-    logger.debug("Fetching reviews | Params=%s | Limit=%d", query_params, limit)
+    logger.info("Fetching reviews | URL=%s | Params=%s | Limit=%d", url, params, limit)
     
     try:
         response = requests.get(url, timeout=REQUEST_TIMEOUT)
@@ -580,12 +604,17 @@ def fetch_reviews(query_params: dict) -> list:
         data = response.json()
         
         items = data.get("items", [])
-        logger.debug("Reviews fetched | Count=%d | Params=%s", len(items), query_params)
+        logger.info("Reviews fetched successfully | Count=%d | Params=%s", len(items), params)
         
         return items
     
+    except requests.exceptions.HTTPError as e:
+        logger.error("HTTP error fetching reviews | Status=%d | URL=%s | Error=%s", 
+                    e.response.status_code, url, str(e))
+        return []  # Return empty list on error, don't fail the whole search
+    
     except Exception as e:
-        logger.error("Failed to fetch reviews | Params=%s | Error=%s", query_params, str(e))
+        logger.error("Failed to fetch reviews | URL=%s | Params=%s | Error=%s", url, params, str(e))
         return []  # Return empty list on error, don't fail the whole search
 
 

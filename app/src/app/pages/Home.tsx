@@ -5,12 +5,14 @@ import { Hospital } from "../data/mockData";
 import { motion, AnimatePresence } from "motion/react";
 import { searchHospitalsAPI } from "../services/api";
 import { LoadingSpinner } from "../components/LoadingSkeleton";
+import { useSearch } from "../contexts/SearchContext";
 
 export function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Hospital[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const { setSearchResults: setGlobalSearchResults, setSearchId: setGlobalSearchId } = useSearch();
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,11 +26,16 @@ export function Home() {
 
     try {
       // Call the search API
-      const results = await searchHospitalsAPI(searchQuery);
-      setSearchResults(results);
+      const { hospitals, searchId } = await searchHospitalsAPI(searchQuery);
+      setSearchResults(hospitals);
+      // Store in global context so detail page can access
+      setGlobalSearchResults(hospitals);
+      setGlobalSearchId(searchId);
     } catch (error) {
       console.error("Search failed:", error);
       setSearchResults([]);
+      setGlobalSearchResults([]);
+      setGlobalSearchId(null);
     } finally {
       setIsLoading(false);
     }

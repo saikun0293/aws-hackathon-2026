@@ -2,15 +2,19 @@ import { useParams, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { ArrowLeft, MapPin, Star, DollarSign, Shield, Phone, Clock, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
-import { Hospital } from "../data/mockData";
-import { getHospitalByIdAPI } from "../services/api";
+import { Hospital, Doctor } from "../data/mockData";
+import { getHospitalByIdAPI, getHospitalDoctorsAPI } from "../services/api";
 import { DoctorCard } from "../components/DoctorCard";
 import ReactMarkdown from "react-markdown";
+import { useSearch } from "../contexts/SearchContext";
 
 export function HospitalDetail() {
   const { id } = useParams();
   const [hospital, setHospital] = useState<Hospital | null>(null);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDoctorsLoading, setIsDoctorsLoading] = useState(false);
+  const { getHospitalById, searchId } = useSearch();
 
   useEffect(() => {
     async function fetchHospital() {
@@ -18,8 +22,37 @@ export function HospitalDetail() {
       
       setIsLoading(true);
       try {
-        const data = await getHospitalByIdAPI(id);
-        setHospital(data);
+        // First try to get from search context (real API results)
+        const contextHospital = getHospitalById(id);
+        
+        if (contextHospital) {
+          console.log("[HospitalDetail] Found hospital in search context");
+          setHospital(contextHospital);
+          
+          // Fetch doctors from real API if we have a searchId
+          if (searchId) {
+            setIsDoctorsLoading(true);
+            try {
+              const fetchedDoctors = await getHospitalDoctorsAPI(id, searchId);
+              setDoctors(fetchedDoctors);
+            } catch (error) {
+              console.error("[HospitalDetail] Failed to fetch doctors:", error);
+              setDoctors([]);
+            } finally {
+              setIsDoctorsLoading(false);
+            }
+          } else {
+            console.warn("[HospitalDetail] No searchId available, cannot fetch doctors");
+            setDoctors([]);
+          }
+        } else {
+          // Fallback to mock data
+          console.log("[HospitalDetail] Hospital not in context, fetching from API");
+          const data = await getHospitalByIdAPI(id);
+          setHospital(data);
+          // Use doctors from mock data
+          setDoctors(data?.doctors || []);
+        }
       } catch (error) {
         console.error("Failed to fetch hospital:", error);
       } finally {
@@ -28,7 +61,7 @@ export function HospitalDetail() {
     }
 
     fetchHospital();
-  }, [id]);
+  }, [id, getHospitalById, searchId]);
 
   if (isLoading) {
     return (
@@ -186,11 +219,26 @@ export function HospitalDetail() {
               className="bg-white rounded-lg border border-gray-200 p-6"
             >
               <h2 className="text-xl font-semibold text-gray-900 mb-4">Our Top Doctors</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {hospital.doctors.map((doctor, index) => (
-                  <DoctorCard key={doctor.id} doctor={doctor} index={index} />
-                ))}
-              </div>
+              {isDoctorsLoading ? (
+                <div className="text-center py-8">
+                  <motion.div
+                    className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full mx-auto mb-3"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  />
+                  <p className="text-gray-600 text-sm">Loading doctors...</p>
+                </div>
+              ) : doctors.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {doctors.map((doctor, index) => (
+                    <DoctorCard key={doctor.id} doctor={doctor} index={index} />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <p>No doctor information available</p>
+                </div>
+              )}
             </motion.div>
 
             {/* Patient Reviews */}

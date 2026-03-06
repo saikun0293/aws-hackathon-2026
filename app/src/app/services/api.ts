@@ -177,17 +177,27 @@ async function callSearchAPI(query: string, customerId?: string): Promise<Search
 
 /**
  * Search hospitals using real API or mock data
+ * Returns both hospitals and searchId for lazy loading doctors
  */
-export async function searchHospitalsAPI(query: string, customerId?: string): Promise<Hospital[]> {
+export async function searchHospitalsAPI(query: string, customerId?: string): Promise<{ hospitals: Hospital[]; searchId: string | null }> {
   if (!query.trim()) {
-    return [];
+    return { hospitals: [], searchId: null };
   }
 
   // Use real API if enabled
   if (USE_REAL_API) {
     try {
       console.log(`[API] Starting async search for: "${query}"`);
-      const response = await callSearchAPI(query, customerId);
+      
+      // Step 1: Initiate search and capture searchId
+      const { searchId, status } = await initiateSearch(query, customerId);
+      
+      if (status === "error") {
+        throw new Error("Failed to initiate search");
+      }
+
+      // Step 2: Poll for results
+      const response = await pollSearchStatus(searchId);
 
       console.log(`[API] Search completed successfully`);
       console.log(`[API] AI Summary:`, response.results.aiSummary);
@@ -206,17 +216,17 @@ export async function searchHospitalsAPI(query: string, customerId?: string): Pr
         })
         .filter((h: Hospital | null): h is Hospital => h !== null);
 
-      return hospitals;
+      return { hospitals, searchId };
     } catch (error) {
       console.error("[API] Error during search:", error);
       console.log("[API] Falling back to mock data");
       // Fall back to mock data on error
-      return searchMockHospitals(query);
+      return { hospitals: searchMockHospitals(query), searchId: null };
     }
   }
 
   // Use mock data
-  return searchMockHospitals(query);
+  return { hospitals: searchMockHospitals(query), searchId: null };
 }
 
 /**
@@ -272,4 +282,43 @@ export async function getAllHospitalsAPI(): Promise<Hospital[]> {
   console.log(`[API] Total hospitals: ${mockHospitals.length}`);
 
   return mockHospitals;
+}
+
+/**
+ * Fetch doctors for a specific hospital (lazy loading)
+ * Uses the real API endpoint: GET /hospitals/{hospitalId}/doctors?searchId={searchId}
+ */
+export async function getHospitalDoctorsAPI(hospitalId: string, searchId: string): Promise<Doctor[]> {
+  if (!USE_REAL_API) {
+    console.log(`[API] Mock mode - returning empty doctors array`);
+    return [];
+  }
+
+  try {
+    const url = `${API_BASE_URL}/hospitals/${hospitalId}/doctors?searchId=${searchId}`;
+    console.log(`[API] Fetching doctors for hospital: ${hospitalId} | SearchId: ${searchId}`);
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch doctors: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    console.log(`[API] Doctors fetched:`, data);
+
+    // Adapt doctors to UI format
+    const doctors = (data.doctors || []).map((d: any) => adaptEnrichedDoctorToDoctor(d));
+    console.log(`[API] Found ${doctors.length} doctors for hospital ${hospitalId}`);
+
+    return doctors;
+  } catch (error) {
+    console.error(`[API] Error fetching doctors for hospital ${hospitalId}:`, error);
+    return []; // Return empty array on error
+  }
 }
