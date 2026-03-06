@@ -16,6 +16,7 @@ export function HospitalDetail() {
   const [isDoctorsLoading, setIsDoctorsLoading] = useState(false);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [expandedReviews, setExpandedReviews] = useState<Set<string>>(new Set());
+  const [acceptedInsurance, setAcceptedInsurance] = useState<string[]>([]);
   const { getHospitalById, searchId } = useSearch();
 
   const toggleReviewExpansion = (reviewId: string) => {
@@ -53,6 +54,54 @@ export function HospitalDetail() {
           console.log("[HospitalDetail] Found hospital in search context");
           console.log("[HospitalDetail] Full hospital object:", contextHospital);
           setHospital(contextHospital);
+          
+          // Fetch insurance companies for this hospital
+          const fetchInsuranceCompanies = async () => {
+            try {
+              // First, fetch the full hospital data to get insuranceCompanyIds
+              const hospitalResponse = await fetch(
+                `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/hospitals/${id}`
+              );
+              if (hospitalResponse.ok) {
+                const hospitalData = await hospitalResponse.json();
+                const insuranceIds = hospitalData.insuranceCompanyIds || [];
+                
+                if (insuranceIds.length > 0) {
+                  console.log("[HospitalDetail] Fetching insurance companies:", insuranceIds);
+                  
+                  // Fetch each insurance company
+                  const insurancePromises = insuranceIds.map(async (insuranceId: string) => {
+                    try {
+                      const response = await fetch(
+                        `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/insurance-companies/${insuranceId}`
+                      );
+                      if (response.ok) {
+                        const data = await response.json();
+                        return data.insuranceCompanyName || insuranceId;
+                      }
+                      return insuranceId;
+                    } catch (error) {
+                      console.error(`Failed to fetch insurance ${insuranceId}:`, error);
+                      return insuranceId;
+                    }
+                  });
+                  
+                  const insuranceNames = await Promise.all(insurancePromises);
+                  console.log("[HospitalDetail] Fetched insurance names:", insuranceNames);
+                  setAcceptedInsurance(insuranceNames);
+                } else {
+                  // Fallback to default list
+                  setAcceptedInsurance(["Blue Cross", "United Health", "Aetna", "Medicare"]);
+                }
+              }
+            } catch (error) {
+              console.error("[HospitalDetail] Failed to fetch insurance companies:", error);
+              // Fallback to default list
+              setAcceptedInsurance(["Blue Cross", "United Health", "Aetna", "Medicare"]);
+            }
+          };
+          
+          fetchInsuranceCompanies();
           
           // Check if hospital has topDoctorIds - these are the doctor IDs from LLM
           if (contextHospital.topDoctorIds && contextHospital.topDoctorIds.length > 0) {
@@ -453,15 +502,19 @@ export function HospitalDetail() {
                   Insurance Accepted
                 </h3>
                 <div className="space-y-2">
-                  {hospital.acceptedInsurance.map((insurance) => (
-                    <div
-                      key={insurance}
-                      className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
-                    >
-                      <span className="text-sm text-gray-700">{insurance}</span>
-                      <ChevronRight className="w-4 h-4 text-gray-400" />
-                    </div>
-                  ))}
+                  {acceptedInsurance.length > 0 ? (
+                    acceptedInsurance.map((insurance) => (
+                      <div
+                        key={insurance}
+                        className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
+                      >
+                        <span className="text-sm text-gray-700">{insurance}</span>
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-gray-500">Loading insurance information...</div>
+                  )}
                 </div>
               </motion.div>
 
