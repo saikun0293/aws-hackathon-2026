@@ -28,6 +28,7 @@ export function HospitalDetail() {
         
         if (contextHospital) {
           console.log("[HospitalDetail] Found hospital in search context");
+          console.log("[HospitalDetail] Full hospital object:", contextHospital);
           setHospital(contextHospital);
           
           // Check if hospital has topDoctorIds - these are the doctor IDs from LLM

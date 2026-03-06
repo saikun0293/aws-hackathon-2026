@@ -532,6 +532,18 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
     # Create a mapping of doctorId -> AI review
     doctor_ai_reviews = {d["doctorId"]: d.get("doctorAIReview", "") for d in hospital_llm.get("doctors", [])}
     
+    # Log for debugging
+    logger.info(
+        "Building doctorAIReviews mapping | HospitalId=%s | DoctorsInLLM=%d | MappingSize=%d",
+        hospital_id,
+        len(hospital_llm.get("doctors", [])),
+        len(doctor_ai_reviews)
+    )
+    if doctor_ai_reviews:
+        logger.info("Sample doctorAIReviews keys: %s", list(doctor_ai_reviews.keys())[:3])
+    else:
+        logger.warning("doctorAIReviews is EMPTY | hospital_llm.doctors=%s", hospital_llm.get("doctors", []))
+    
     # Format reviews for UI
     formatted_reviews = []
     for review in reviews[:2]:  # Only first 2 reviews
@@ -1207,6 +1219,23 @@ def get_search_status(event: dict) -> dict:
             hospital_ids = list(set([h["hospitalId"] for h in hospitals_llm]))
             
             logger.info("Enriching hospitals on-the-fly | SearchId=%s | Count=%d", search_id, len(hospital_ids))
+            
+            # Log first hospital structure for debugging
+            if hospitals_llm:
+                first_hospital = hospitals_llm[0]
+                logger.info(
+                    "First hospital structure | HospitalId=%s | HasDoctors=%s | DoctorCount=%d",
+                    first_hospital.get("hospitalId"),
+                    "doctors" in first_hospital,
+                    len(first_hospital.get("doctors", []))
+                )
+                if first_hospital.get("doctors"):
+                    first_doctor = first_hospital["doctors"][0]
+                    logger.info(
+                        "First doctor structure | DoctorId=%s | HasAIReview=%s",
+                        first_doctor.get("doctorId"),
+                        "doctorAIReview" in first_doctor
+                    )
             
             # Fetch hospital data and reviews in parallel
             hospitals_data = {}
