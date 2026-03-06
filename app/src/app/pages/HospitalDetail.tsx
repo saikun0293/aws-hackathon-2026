@@ -251,21 +251,21 @@ export function HospitalDetail() {
                     const departmentIds = hospitalData.departmentIds || [];
                     console.log("[HospitalDetail] Hospital has departments:", departmentIds);
                     
-                    // Fetch all departments and collect doctor IDs
+                    // Fetch doctors for each department using departmentId query parameter
                     const allDoctorIds: string[] = [];
                     for (const deptId of departmentIds) {
                       try {
-                        const deptResponse = await fetch(
-                          `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/departments/${deptId}`
+                        const doctorsResponse = await fetch(
+                          `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/doctors?departmentId=${deptId}&limit=100`
                         );
-                        if (deptResponse.ok) {
-                          const deptData = await deptResponse.json();
-                          const deptDoctorIds = deptData.doctorIds || [];
+                        if (doctorsResponse.ok) {
+                          const doctorsData = await doctorsResponse.json();
+                          const deptDoctorIds = (doctorsData.items || []).map((d: any) => d.doctorId);
                           allDoctorIds.push(...deptDoctorIds);
                           console.log(`[HospitalDetail] Department ${deptId} has ${deptDoctorIds.length} doctors`);
                         }
                       } catch (error) {
-                        console.warn(`Failed to fetch department ${deptId}:`, error);
+                        console.warn(`Failed to fetch doctors for department ${deptId}:`, error);
                       }
                     }
                     
