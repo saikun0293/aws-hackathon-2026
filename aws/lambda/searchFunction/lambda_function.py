@@ -45,6 +45,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
+import re
 
 import boto3
 import requests
@@ -421,6 +422,12 @@ def invoke_bedrock_agent(query: str, customer_id: str, max_retries: int = LLM_MA
                     json_str = json_str_stripped[:last_brace + 1]
                     logger.info("Truncated to last complete brace | NewLength=%d", len(json_str))
             
+            # Clean common JSON issues
+            # Remove trailing commas before closing braces/brackets
+            json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+            # Remove multiple consecutive commas
+            json_str = re.sub(r',\s*,', ',', json_str)
+            
             llm_data = json.loads(json_str)
             logger.info(
                 "LLM response parsed successfully | Attempt=%d | Hospitals=%d | HasSummary=%s",
@@ -431,8 +438,12 @@ def invoke_bedrock_agent(query: str, customer_id: str, max_retries: int = LLM_MA
             return llm_data
         
         except json.JSONDecodeError as e:
-            logger.error("Failed to parse LLM response as JSON | Attempt=%d | Error=%s | Response=%s", attempt, str(e), full_response[:500])
-            logger.error("JSON string that failed to parse (last 500 chars): %s", json_str[-500:] if len(json_str) > 500 else json_str)
+            logger.error("Failed to parse LLM response as JSON | Attempt=%d | Error=%s | Position=line %d col %d", 
+                        attempt, str(e), e.lineno, e.colno)
+            logger.error("JSON context around error (chars %d-%d): %s", 
+                        max(0, e.pos - 100), e.pos + 100, 
+                        json_str[max(0, e.pos - 100):e.pos + 100] if hasattr(e, 'pos') else "N/A")
+            logger.error("Full response (first 1000 chars): %s", full_response[:1000])
             if attempt < max_retries:
                 logger.info("Retrying LLM invocation | Attempt=%d/%d", attempt + 1, max_retries)
                 time.sleep(1)  # Wait 1 second before retry
@@ -617,31 +628,48 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
             continue
     
     # Parse hospital location coordinates
-    hospital_location_str = hospital_data.get("location", "")
+    # First try to get coordinates from LLM response (if available)
     hospital_lat, hospital_lon = None, None
     distance_km = None
     
-    if hospital_location_str:
-        try:
-            # Location format: "lat, lon" or "17.385044, 78.486671"
-            parts = hospital_location_str.split(",")
-            if len(parts) == 2:
-                hospital_lat = float(parts[0].strip())
-                hospital_lon = float(parts[1].strip())
-                
-                # Calculate distance if user location is provided
-                if user_location and "latitude" in user_location and "longitude" in user_location:
-                    user_lat = user_location["latitude"]
-                    user_lon = user_location["longitude"]
-                    distance_km = calculate_distance(user_lat, user_lon, hospital_lat, hospital_lon)
-                    logger.info(
-                        "Distance calculated | HospitalId=%s | Distance=%.1f km",
-                        hospital_id,
-                        distance_km if distance_km else 0
-                    )
-        except Exception as e:
-            logger.warning("Failed to parse hospital location | HospitalId=%s | Location=%s | Error=%s", 
-                         hospital_id, hospital_location_str, str(e))
+    # Check if LLM provided coordinates
+    llm_coordinates = hospital_llm.get("coordinates", {})
+    if llm_coordinates and "latitude" in llm_coordinates and "longitude" in llm_coordinates:
+        hospital_lat = llm_coordinates["latitude"]
+        hospital_lon = llm_coordinates["longitude"]
+        logger.info("Using coordinates from LLM | HospitalId=%s | Lat=%.3f | Lon=%.3f", 
+                   hospital_id, hospital_lat, hospital_lon)
+    else:
+        # Fallback: try to parse from hospital data's location field
+        hospital_location_str = hospital_data.get("location", "")
+        if hospital_location_str:
+            try:
+                # Location format: "lat, lon" or "17.385044, 78.486671"
+                parts = hospital_location_str.split(",")
+                if len(parts) == 2:
+                    hospital_lat = float(parts[0].strip())
+                    hospital_lon = float(parts[1].strip())
+                    logger.info("Parsed coordinates from hospital data | HospitalId=%s | Lat=%.3f | Lon=%.3f", 
+                               hospital_id, hospital_lat, hospital_lon)
+            except Exception as e:
+                logger.warning("Failed to parse hospital location | HospitalId=%s | Location=%s | Error=%s", 
+                             hospital_id, hospital_location_str, str(e))
+    
+    # Calculate distance if we have both hospital and user coordinates
+    if hospital_lat and hospital_lon and user_location:
+        if "latitude" in user_location and "longitude" in user_location:
+            user_lat = user_location["latitude"]
+            user_lon = user_location["longitude"]
+            distance_km = calculate_distance(user_lat, user_lon, hospital_lat, hospital_lon)
+            logger.info(
+                "Distance calculated | HospitalId=%s | Distance=%.1f km | UserLat=%.3f | UserLon=%.3f | HospitalLat=%.3f | HospitalLon=%.3f",
+                hospital_id,
+                distance_km if distance_km else 0,
+                user_lat,
+                user_lon,
+                hospital_lat,
+                hospital_lon
+            )
     
     return {
         "id": hospital_id,

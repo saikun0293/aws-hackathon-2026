@@ -115,14 +115,21 @@ async function initiateSearch(query: string, customerId?: string): Promise<{ sea
   // Get user location
   const userLocation = await getUserLocation();
   
+  // Replace "near me" with "in Hyderabad" since Agent doesn't use userContext location
+  // This must be done BEFORE checking hasLocation
+  let enhancedQuery = query.replace(/\bnear\s+me\b/i, 'in Hyderabad');
+  
   // If query doesn't mention a location, append "in Hyderabad" as default
-  let enhancedQuery = query;
-  const hasLocation = /\b(in|near|at|around)\s+\w+/i.test(query) || 
-                      /hyderabad|bangalore|mumbai|delhi|chennai|kolkata/i.test(query);
+  const hasLocation = /\b(in|near|at|around)\s+\w+/i.test(enhancedQuery) || 
+                      /hyderabad|bangalore|mumbai|delhi|chennai|kolkata/i.test(enhancedQuery);
   
   if (!hasLocation) {
-    enhancedQuery = `${query} in Hyderabad`;
+    enhancedQuery = `${enhancedQuery} in Hyderabad`;
     console.log(`[API] No location detected, enhanced query: "${enhancedQuery}"`);
+  }
+  
+  if (enhancedQuery !== query) {
+    console.log(`[API] Query enhanced: "${query}" → "${enhancedQuery}"`);
   }
 
   const requestBody = {

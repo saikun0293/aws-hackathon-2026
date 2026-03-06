@@ -238,27 +238,46 @@ export function HospitalDetail() {
               let fetchedDoctors = (await Promise.all(doctorPromises)).filter(d => d !== null);
               console.log("[HospitalDetail] Fetched doctors from LLM:", fetchedDoctors.length);
               
-              // If less than 3 doctors, fetch additional doctors from hospital
+              // If less than 3 doctors, fetch additional doctors from hospital departments
               if (fetchedDoctors.length < 3) {
-                console.log("[HospitalDetail] Less than 3 doctors, fetching additional from hospital");
+                console.log("[HospitalDetail] Less than 3 doctors, fetching additional from hospital departments");
                 try {
-                  // Fetch hospital data to get all doctor IDs
+                  // Fetch hospital data to get department IDs
                   const hospitalResponse = await fetch(
                     `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/hospitals/${id}`
                   );
                   if (hospitalResponse.ok) {
                     const hospitalData = await hospitalResponse.json();
-                    const allDoctorIds = hospitalData.doctorIds || [];
+                    const departmentIds = hospitalData.departmentIds || [];
+                    console.log("[HospitalDetail] Hospital has departments:", departmentIds);
+                    
+                    // Fetch all departments and collect doctor IDs
+                    const allDoctorIds: string[] = [];
+                    for (const deptId of departmentIds) {
+                      try {
+                        const deptResponse = await fetch(
+                          `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/departments/${deptId}`
+                        );
+                        if (deptResponse.ok) {
+                          const deptData = await deptResponse.json();
+                          const deptDoctorIds = deptData.doctorIds || [];
+                          allDoctorIds.push(...deptDoctorIds);
+                          console.log(`[HospitalDetail] Department ${deptId} has ${deptDoctorIds.length} doctors`);
+                        }
+                      } catch (error) {
+                        console.warn(`Failed to fetch department ${deptId}:`, error);
+                      }
+                    }
+                    
+                    console.log("[HospitalDetail] Total doctors from all departments:", allDoctorIds.length);
                     
                     // Filter out doctors we already have
                     const existingDoctorIds = new Set(fetchedDoctors.map(d => d.id));
-                    const additionalDoctorIds = allDoctorIds
-                      .filter((did: string) => !existingDoctorIds.has(did))
-                      .slice(0, 3 - fetchedDoctors.length);  // Get only what we need to reach 3
+                    const additionalDoctorIds = allDoctorIds.filter((did: string) => !existingDoctorIds.has(did));
                     
-                    console.log("[HospitalDetail] Fetching additional doctors:", additionalDoctorIds);
+                    console.log("[HospitalDetail] Fetching additional doctors to sort:", additionalDoctorIds.length);
                     
-                    // Fetch additional doctors
+                    // Fetch ALL additional doctors (so we can sort them)
                     const additionalPromises = additionalDoctorIds.map(async (doctorId: string) => {
                       try {
                         const doctorResponse = await fetch(
@@ -316,7 +335,23 @@ export function HospitalDetail() {
                       }
                     });
                     
-                    const additionalDoctors = (await Promise.all(additionalPromises)).filter(d => d !== null);
+                    let additionalDoctors = (await Promise.all(additionalPromises)).filter(d => d !== null);
+                    
+                    // Sort by rating (descending) and review count (descending) to get top doctors
+                    additionalDoctors.sort((a, b) => {
+                      // First sort by rating
+                      if (b.rating !== a.rating) {
+                        return b.rating - a.rating;
+                      }
+                      // If ratings are equal, sort by review count
+                      return b.reviewCount - a.reviewCount;
+                    });
+                    
+                    // Take only the top doctors we need to reach 3 total
+                    const neededCount = 3 - fetchedDoctors.length;
+                    additionalDoctors = additionalDoctors.slice(0, neededCount);
+                    
+                    console.log("[HospitalDetail] Selected top additional doctors:", additionalDoctors.length);
                     fetchedDoctors = [...fetchedDoctors, ...additionalDoctors];
                     console.log("[HospitalDetail] Total doctors after adding additional:", fetchedDoctors.length);
                   }
