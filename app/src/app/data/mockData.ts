@@ -21,6 +21,7 @@ export interface Doctor {
   imageUrl: string;
   reviews: Review[];
   aiSummary: string;
+  about?: string;  // Doctor description/about text
 }
 
 export interface Hospital {

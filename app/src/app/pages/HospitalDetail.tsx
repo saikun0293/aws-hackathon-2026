@@ -153,7 +153,7 @@ export function HospitalDetail() {
               const doctorAIReviews = contextHospital.doctorAIReviews || {};
               console.log("[HospitalDetail] Using doctorAIReviews mapping:", doctorAIReviews);
               
-              // Fetch each doctor's details from the Doctor API
+              // Fetch doctors from LLM recommendations
               const doctorPromises = contextHospital.topDoctorIds.map(async (doctorId: string) => {
                 try {
                   // Fetch doctor data
@@ -182,8 +182,17 @@ export function HospitalDetail() {
                   }
                   
                   // Get AI review for this doctor
-                  const aiReview = doctorAIReviews[doctorId] || "";
+                  let aiReview = doctorAIReviews[doctorId] || "";
                   console.log(`[HospitalDetail] Doctor ${doctorId} AI review:`, aiReview ? "Found" : "EMPTY");
+                  
+                  // Replace doctor ID with actual doctor name in AI review
+                  // LLM sometimes uses "Dr. doctor_xyz" format, replace with actual name
+                  const doctorName = doctorData.doctorName || "Unknown Doctor";
+                  if (aiReview && doctorId) {
+                    // Replace patterns like "Dr. doctor_xyz" or "doctor_xyz" with actual name
+                    aiReview = aiReview.replace(new RegExp(`Dr\\.?\\s*${doctorId}`, 'gi'), doctorName);
+                    aiReview = aiReview.replace(new RegExp(doctorId, 'gi'), doctorName);
+                  }
                   
                   // Extract qualifications from 'about' field since Doctor table doesn't have qualifications field
                   const qualifications: string[] = [];
@@ -209,7 +218,7 @@ export function HospitalDetail() {
                   // Transform to UI format
                   return {
                     id: doctorData.doctorId,
-                    name: doctorData.doctorName || "Unknown Doctor",
+                    name: doctorName,
                     specialty: doctorData.specialty || "General",
                     experience: doctorData.yearsOfExperience || 10,
                     qualifications: qualifications,
@@ -217,6 +226,7 @@ export function HospitalDetail() {
                     reviewCount: reviewCount,  // Use fetched review count
                     imageUrl: "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=200",  // Use real image URL
                     aiSummary: aiReview, // Use AI review from hospital object
+                    about: about,  // Add doctor description
                     reviews: [],
                   };
                 } catch (error) {
@@ -225,8 +235,97 @@ export function HospitalDetail() {
                 }
               });
               
-              const fetchedDoctors = (await Promise.all(doctorPromises)).filter(d => d !== null);
-              console.log("[HospitalDetail] Fetched doctors:", fetchedDoctors.length);
+              let fetchedDoctors = (await Promise.all(doctorPromises)).filter(d => d !== null);
+              console.log("[HospitalDetail] Fetched doctors from LLM:", fetchedDoctors.length);
+              
+              // If less than 3 doctors, fetch additional doctors from hospital
+              if (fetchedDoctors.length < 3) {
+                console.log("[HospitalDetail] Less than 3 doctors, fetching additional from hospital");
+                try {
+                  // Fetch hospital data to get all doctor IDs
+                  const hospitalResponse = await fetch(
+                    `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/hospitals/${id}`
+                  );
+                  if (hospitalResponse.ok) {
+                    const hospitalData = await hospitalResponse.json();
+                    const allDoctorIds = hospitalData.doctorIds || [];
+                    
+                    // Filter out doctors we already have
+                    const existingDoctorIds = new Set(fetchedDoctors.map(d => d.id));
+                    const additionalDoctorIds = allDoctorIds
+                      .filter((did: string) => !existingDoctorIds.has(did))
+                      .slice(0, 3 - fetchedDoctors.length);  // Get only what we need to reach 3
+                    
+                    console.log("[HospitalDetail] Fetching additional doctors:", additionalDoctorIds);
+                    
+                    // Fetch additional doctors
+                    const additionalPromises = additionalDoctorIds.map(async (doctorId: string) => {
+                      try {
+                        const doctorResponse = await fetch(
+                          `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/doctors/${doctorId}`
+                        );
+                        if (!doctorResponse.ok) return null;
+                        
+                        const doctorData = await doctorResponse.json();
+                        
+                        // Fetch review count
+                        let reviewCount = 0;
+                        try {
+                          const reviewsResponse = await fetch(
+                            `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/reviews?doctorId=${doctorId}&limit=100`
+                          );
+                          if (reviewsResponse.ok) {
+                            const reviewsData = await reviewsResponse.json();
+                            reviewCount = reviewsData.count || 0;
+                          }
+                        } catch (error) {
+                          console.warn(`Failed to fetch reviews for additional doctor ${doctorId}:`, error);
+                        }
+                        
+                        // Extract qualifications
+                        const qualifications: string[] = [];
+                        const about = doctorData.about || "";
+                        const qualMatches = about.match(/\b(MBBS|MD|MS|MCh|DM|DNB|FRCS|MRCP|PhD|Fellowship|Board Certified)\b/gi);
+                        if (qualMatches) {
+                          const seen = new Set<string>();
+                          for (const qual of qualMatches) {
+                            const upper = qual.toUpperCase();
+                            if (!seen.has(upper) && qualifications.length < 5) {
+                              seen.add(upper);
+                              qualifications.push(upper);
+                            }
+                          }
+                        }
+                        
+                        return {
+                          id: doctorData.doctorId,
+                          name: doctorData.doctorName || "Unknown Doctor",
+                          specialty: doctorData.specialty || "General",
+                          experience: doctorData.yearsOfExperience || 10,
+                          qualifications: qualifications,
+                          rating: doctorData.rating || 4.5,
+                          reviewCount: reviewCount,
+                          imageUrl: "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=200",
+                          aiSummary: "",  // No AI review for additional doctors
+                          about: about,
+                          reviews: [],
+                        };
+                      } catch (error) {
+                        console.error(`Error fetching additional doctor ${doctorId}:`, error);
+                        return null;
+                      }
+                    });
+                    
+                    const additionalDoctors = (await Promise.all(additionalPromises)).filter(d => d !== null);
+                    fetchedDoctors = [...fetchedDoctors, ...additionalDoctors];
+                    console.log("[HospitalDetail] Total doctors after adding additional:", fetchedDoctors.length);
+                  }
+                } catch (error) {
+                  console.error("[HospitalDetail] Failed to fetch additional doctors:", error);
+                }
+              }
+              
+              console.log("[HospitalDetail] Final doctor count:", fetchedDoctors.length);
               console.log("[HospitalDetail] Doctors with AI reviews:", fetchedDoctors.filter(d => d.aiSummary).length);
               setDoctors(fetchedDoctors);
             } catch (error) {

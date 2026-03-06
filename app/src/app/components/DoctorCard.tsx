@@ -63,18 +63,27 @@ export function DoctorCard({ doctor, index }: DoctorCardProps) {
         </div>
       </div>
 
-      {/* AI Summary */}
-      <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded p-3 border border-green-100">
-        <div className="flex items-center gap-1.5 mb-2">
-          <div className="w-5 h-5 bg-gradient-to-r from-green-500 to-blue-500 rounded-full flex items-center justify-center">
-            <span className="text-white text-[10px] font-bold">AI</span>
+      {/* About/Description - First 2 lines */}
+      {doctor.about && (
+        <div className="mb-3 text-xs text-gray-600 line-clamp-2">
+          {doctor.about}
+        </div>
+      )}
+
+      {/* AI Summary - Only show if aiSummary exists */}
+      {doctor.aiSummary && doctor.aiSummary.trim() && (
+        <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded p-3 border border-green-100">
+          <div className="flex items-center gap-1.5 mb-2">
+            <div className="w-5 h-5 bg-gradient-to-r from-green-500 to-blue-500 rounded-full flex items-center justify-center">
+              <span className="text-white text-[10px] font-bold">AI</span>
+            </div>
+            <span className="text-xs font-semibold text-gray-700">Why this doctor</span>
           </div>
-          <span className="text-xs font-semibold text-gray-700">Why this doctor</span>
+          <div className="prose prose-xs max-w-none text-gray-600 text-xs">
+            <ReactMarkdown>{doctor.aiSummary}</ReactMarkdown>
+          </div>
         </div>
-        <div className="prose prose-xs max-w-none text-gray-600 text-xs">
-          <ReactMarkdown>{doctor.aiSummary}</ReactMarkdown>
-        </div>
-      </div>
+      )}
 
       {/* Patient Reviews Summary */}
       {doctor.reviews.length > 0 && (

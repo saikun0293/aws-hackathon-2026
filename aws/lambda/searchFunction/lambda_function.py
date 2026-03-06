@@ -587,7 +587,7 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
     
     # Format reviews for UI
     formatted_reviews = []
-    for review in reviews[:2]:  # Only first 2 reviews
+    for review in reviews[:5]:  # Only first 5 reviews
         try:
             payment = review.get("payment") or {}
             claim = review.get("claim") or {}
@@ -1335,7 +1335,7 @@ def get_search_status(event: dict) -> dict:
                     futures[future] = ("hospital", hospital_id)
                 
                 for hospital_id in hospital_ids:
-                    future = executor.submit(fetch_reviews, {"hospitalId": hospital_id, "limit": 2})
+                    future = executor.submit(fetch_reviews, {"hospitalId": hospital_id, "limit": 5})
                     futures[future] = ("hospital_reviews", hospital_id)
                 
                 for future in as_completed(futures):
