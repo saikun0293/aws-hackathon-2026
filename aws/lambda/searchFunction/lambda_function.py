@@ -627,33 +627,28 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
             logger.warning("Failed to format review | ReviewId=%s | Error=%s", review.get("reviewId"), str(e))
             continue
     
-    # Parse hospital location coordinates
-    # First try to get coordinates from LLM response (if available)
+    # Parse hospital location coordinates from Hospital table
     hospital_lat, hospital_lon = None, None
     distance_km = None
     
-    # Check if LLM provided coordinates
-    llm_coordinates = hospital_llm.get("coordinates", {})
-    if llm_coordinates and "latitude" in llm_coordinates and "longitude" in llm_coordinates:
-        hospital_lat = llm_coordinates["latitude"]
-        hospital_lon = llm_coordinates["longitude"]
-        logger.info("Using coordinates from LLM | HospitalId=%s | Lat=%.3f | Lon=%.3f", 
-                   hospital_id, hospital_lat, hospital_lon)
+    logger.info("Parsing hospital coordinates | HospitalId=%s | user_location=%s", hospital_id, user_location)
+    
+    # Get location from hospital data (format: "17.4122, 78.4071")
+    hospital_location_str = hospital_data.get("location", "")
+    if hospital_location_str:
+        try:
+            # Location format: "lat, lon" or "17.385044, 78.486671"
+            parts = hospital_location_str.split(",")
+            if len(parts) == 2:
+                hospital_lat = float(parts[0].strip())
+                hospital_lon = float(parts[1].strip())
+                logger.info("Parsed coordinates from hospital data | HospitalId=%s | Lat=%.3f | Lon=%.3f", 
+                           hospital_id, hospital_lat, hospital_lon)
+        except Exception as e:
+            logger.warning("Failed to parse hospital location | HospitalId=%s | Location=%s | Error=%s", 
+                         hospital_id, hospital_location_str, str(e))
     else:
-        # Fallback: try to parse from hospital data's location field
-        hospital_location_str = hospital_data.get("location", "")
-        if hospital_location_str:
-            try:
-                # Location format: "lat, lon" or "17.385044, 78.486671"
-                parts = hospital_location_str.split(",")
-                if len(parts) == 2:
-                    hospital_lat = float(parts[0].strip())
-                    hospital_lon = float(parts[1].strip())
-                    logger.info("Parsed coordinates from hospital data | HospitalId=%s | Lat=%.3f | Lon=%.3f", 
-                               hospital_id, hospital_lat, hospital_lon)
-            except Exception as e:
-                logger.warning("Failed to parse hospital location | HospitalId=%s | Location=%s | Error=%s", 
-                             hospital_id, hospital_location_str, str(e))
+        logger.warning("Hospital location field is empty | HospitalId=%s", hospital_id)
     
     # Calculate distance if we have both hospital and user coordinates
     if hospital_lat and hospital_lon and user_location:
@@ -670,6 +665,11 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
                 hospital_lat,
                 hospital_lon
             )
+        else:
+            logger.warning("User location missing lat/lon | HospitalId=%s | UserLocation=%s", hospital_id, user_location)
+    else:
+        logger.warning("Cannot calculate distance | HospitalId=%s | HospitalLat=%s | HospitalLon=%s | UserLocation=%s", 
+                      hospital_id, hospital_lat, hospital_lon, user_location)
     
     return {
         "id": hospital_id,
@@ -1322,6 +1322,17 @@ def get_search_status(event: dict) -> dict:
         if status == "complete":
             llm_response = item.get("llmResponse", {})
             user_location = item.get("userLocation")  # Extract user location from DynamoDB
+            
+            # Convert Decimal to float for user_location (DynamoDB stores as Decimal)
+            if user_location and isinstance(user_location, dict):
+                if "latitude" in user_location:
+                    user_location["latitude"] = float(user_location["latitude"])
+                if "longitude" in user_location:
+                    user_location["longitude"] = float(user_location["longitude"])
+                logger.info("User location retrieved | Lat=%.3f | Lon=%.3f", 
+                           user_location.get("latitude", 0), user_location.get("longitude", 0))
+            else:
+                logger.warning("User location not found in DynamoDB | SearchId=%s", search_id)
             
             if not llm_response:
                 logger.error("LLM response missing | SearchId=%s", search_id)
