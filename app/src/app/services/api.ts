@@ -51,6 +51,9 @@ function adaptEnrichedHospitalToHospital(enriched: any): Hospital {
       : 0,
     topDoctorIds: Array.isArray(enriched.topDoctorIds) ? enriched.topDoctorIds : [],
     doctorAIReviews: enriched.doctorAIReviews || {},
+    // Location and distance fields
+    coordinates: enriched.coordinates || undefined,
+    distance: typeof enriched.distance === 'number' ? enriched.distance : undefined,
   };
 }
 
