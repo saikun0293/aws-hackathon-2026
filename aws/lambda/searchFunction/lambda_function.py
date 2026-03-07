@@ -642,7 +642,7 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
             if len(parts) == 2:
                 hospital_lat = float(parts[0].strip())
                 hospital_lon = float(parts[1].strip())
-                logger.info("Parsed coordinates from hospital data | HospitalId=%s | Lat=%.3f | Lon=%.3f", 
+                logger.info("Parsed coordinates from hospital data | HospitalId=%s | Lat=%.6f | Lon=%.6f", 
                            hospital_id, hospital_lat, hospital_lon)
         except Exception as e:
             logger.warning("Failed to parse hospital location | HospitalId=%s | Location=%s | Error=%s", 
@@ -653,18 +653,29 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
     # Calculate distance if we have both hospital and user coordinates
     if hospital_lat and hospital_lon and user_location:
         if "latitude" in user_location and "longitude" in user_location:
-            user_lat = user_location["latitude"]
-            user_lon = user_location["longitude"]
-            distance_km = calculate_distance(user_lat, user_lon, hospital_lat, hospital_lon)
+            # Convert Decimal to float if needed (DynamoDB returns Decimal)
+            user_lat = float(user_location["latitude"]) if isinstance(user_location["latitude"], Decimal) else user_location["latitude"]
+            user_lon = float(user_location["longitude"]) if isinstance(user_location["longitude"], Decimal) else user_location["longitude"]
+            
             logger.info(
-                "Distance calculated | HospitalId=%s | Distance=%.1f km | UserLat=%.3f | UserLon=%.3f | HospitalLat=%.3f | HospitalLon=%.3f",
+                "Calculating distance | HospitalId=%s | UserLat=%.6f | UserLon=%.6f | HospitalLat=%.6f | HospitalLon=%.6f",
                 hospital_id,
-                distance_km if distance_km else 0,
                 user_lat,
                 user_lon,
                 hospital_lat,
                 hospital_lon
             )
+            
+            distance_km = calculate_distance(user_lat, user_lon, hospital_lat, hospital_lon)
+            
+            if distance_km is not None:
+                logger.info(
+                    "Distance calculated successfully | HospitalId=%s | Distance=%.1f km",
+                    hospital_id,
+                    distance_km
+                )
+            else:
+                logger.warning("Distance calculation returned None | HospitalId=%s", hospital_id)
         else:
             logger.warning("User location missing lat/lon | HospitalId=%s | UserLocation=%s", hospital_id, user_location)
     else:

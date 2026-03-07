@@ -61,6 +61,8 @@ class DecimalEncoder(json.JSONEncoder):
     def default(self, obj: Any) -> Any:
         if isinstance(obj, Decimal):
             return int(obj) if obj % 1 == 0 else float(obj)
+        if isinstance(obj, set):
+            return list(obj)  # Convert sets to lists for JSON serialization
         return super().default(obj)
 
 
