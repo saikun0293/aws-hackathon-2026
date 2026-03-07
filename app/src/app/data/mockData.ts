@@ -21,6 +21,7 @@ export interface Doctor {
   imageUrl: string;
   reviews: Review[];
   aiSummary: string;
+  about?: string;  // Doctor description/about text
 }
 
 export interface Hospital {
@@ -47,6 +48,12 @@ export interface Hospital {
   insuranceCoveragePercent?: number;
   topDoctorIds?: string[];  // Doctor IDs for lazy loading
   doctorAIReviews?: Record<string, string>;  // Map of doctorId -> AI review
+  // Location and distance fields
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+  };
+  distance?: number;  // Distance in km
 }
 
 export const mockHospitals: Hospital[] = [

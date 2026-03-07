@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "motion/react";
-import { MapPin, DollarSign, Shield, ChevronRight, CheckCircle, ChevronDown, ChevronUp, Star } from "lucide-react";
+import { MapPin, DollarSign, Shield, ChevronRight, CheckCircle, ChevronDown, ChevronUp, Star, Navigation } from "lucide-react";
 import { Hospital } from "../data/mockData";
 import ReactMarkdown from "react-markdown";
 
@@ -78,10 +78,25 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
       animate={{ opacity: 1, y: 0 }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`bg-white rounded-lg border-2 transition-all ${
+      className={`bg-white rounded-lg border-2 transition-all relative ${
         isHovered ? "border-blue-500 shadow-lg" : "border-gray-200 shadow-sm"
       }`}
     >
+      {/* Distance Badge - Top Right with better design */}
+      {hospital.distance != null && (
+        <div className="absolute top-3 right-3 z-10">
+          <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 border border-blue-400">
+            <div className="bg-white/20 rounded-full p-1">
+              <Navigation className="w-4 h-4" />
+            </div>
+            <div className="flex flex-col leading-tight">
+              <span className="text-xs font-medium opacity-90">Distance</span>
+              <span className="text-sm font-bold">{hospital.distance.toFixed(1)} km</span>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <div className="p-6">
         {/* Header Section */}
         <Link to={`/hospital/${hospital.id}`} className="block">
@@ -95,7 +110,7 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
                 e.currentTarget.src = "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=400";
               }}
             />
-            <div className="flex-1">
+            <div className="flex-1 pr-8">
               <div className="flex items-center gap-2 mb-1">
                 <h3 className="font-semibold text-lg">{hospital.name}</h3>
                 {hospital.verificationBadge && (

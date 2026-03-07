@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Search, Sparkles } from "lucide-react";
 import { HospitalCard } from "../components/HospitalCard";
 import { Hospital } from "../data/mockData";
@@ -8,11 +8,19 @@ import { LoadingSpinner } from "../components/LoadingSkeleton";
 import { useSearch } from "../contexts/SearchContext";
 
 export function Home() {
+  const { searchResults: globalSearchResults, setSearchResults: setGlobalSearchResults, setSearchId: setGlobalSearchId } = useSearch();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Hospital[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { setSearchResults: setGlobalSearchResults, setSearchId: setGlobalSearchId } = useSearch();
+
+  // Restore search results from context when component mounts
+  useEffect(() => {
+    if (globalSearchResults && globalSearchResults.length > 0) {
+      setSearchResults(globalSearchResults);
+      setHasSearched(true);
+    }
+  }, [globalSearchResults]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,6 +35,10 @@ export function Home() {
     try {
       // Call the search API
       const { hospitals, searchId } = await searchHospitalsAPI(searchQuery);
+      console.log("[Home] Search results received:", hospitals.length, "hospitals");
+      console.log("[Home] First hospital data:", hospitals[0]);
+      console.log("[Home] First hospital coordinates:", hospitals[0]?.coordinates);
+      console.log("[Home] First hospital distance:", hospitals[0]?.distance);
       setSearchResults(hospitals);
       // Store in global context so detail page can access
       setGlobalSearchResults(hospitals);

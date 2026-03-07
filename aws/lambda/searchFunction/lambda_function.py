@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 import uuid
@@ -44,6 +45,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
+import re
 
 import boto3
 import requests
@@ -189,7 +191,41 @@ def deserialize_dynamodb_json(obj: Any) -> Any:
         return obj
 
 
-def save_search_results(search_id: str, status: str, llm_response: dict = None, error: str = None) -> None:
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate distance between two points using Haversine formula.
+    
+    Args:
+        lat1: Latitude of point 1
+        lon1: Longitude of point 1
+        lat2: Latitude of point 2
+        lon2: Longitude of point 2
+    
+    Returns:
+        Distance in kilometers (rounded to 1 decimal place)
+    """
+    try:
+        # Earth's radius in kilometers
+        R = 6371.0
+        
+        # Convert degrees to radians
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+        
+        # Haversine formula
+        a = math.sin(delta_lat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        
+        distance = R * c
+        return round(distance, 1)  # Round to 1 decimal place
+    except Exception as e:
+        logger.warning(f"Failed to calculate distance: {e}")
+        return None
+
+
+def save_search_results(search_id: str, status: str, llm_response: dict = None, error: str = None, user_location: dict = None) -> None:
     """
     Save search results to DynamoDB.
     
@@ -198,6 +234,7 @@ def save_search_results(search_id: str, status: str, llm_response: dict = None, 
         status: Search status ("processing", "complete", "error")
         llm_response: Raw LLM response (optional)
         error: Error message if status is "error" (optional)
+        user_location: User's location {"latitude": float, "longitude": float} (optional)
     """
     try:
         # Calculate TTL (5 hours from now)
@@ -209,6 +246,9 @@ def save_search_results(search_id: str, status: str, llm_response: dict = None, 
             "updatedAt": datetime.now(timezone.utc).isoformat(),
             "ttl": ttl
         }
+        
+        if user_location:
+            item["userLocation"] = convert_floats_to_decimal(user_location)
         
         if llm_response:
             # Convert floats to Decimal for DynamoDB
@@ -382,6 +422,12 @@ def invoke_bedrock_agent(query: str, customer_id: str, max_retries: int = LLM_MA
                     json_str = json_str_stripped[:last_brace + 1]
                     logger.info("Truncated to last complete brace | NewLength=%d", len(json_str))
             
+            # Clean common JSON issues
+            # Remove trailing commas before closing braces/brackets
+            json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+            # Remove multiple consecutive commas
+            json_str = re.sub(r',\s*,', ',', json_str)
+            
             llm_data = json.loads(json_str)
             logger.info(
                 "LLM response parsed successfully | Attempt=%d | Hospitals=%d | HasSummary=%s",
@@ -392,8 +438,12 @@ def invoke_bedrock_agent(query: str, customer_id: str, max_retries: int = LLM_MA
             return llm_data
         
         except json.JSONDecodeError as e:
-            logger.error("Failed to parse LLM response as JSON | Attempt=%d | Error=%s | Response=%s", attempt, str(e), full_response[:500])
-            logger.error("JSON string that failed to parse (last 500 chars): %s", json_str[-500:] if len(json_str) > 500 else json_str)
+            logger.error("Failed to parse LLM response as JSON | Attempt=%d | Error=%s | Position=line %d col %d", 
+                        attempt, str(e), e.lineno, e.colno)
+            logger.error("JSON context around error (chars %d-%d): %s", 
+                        max(0, e.pos - 100), e.pos + 100, 
+                        json_str[max(0, e.pos - 100):e.pos + 100] if hasattr(e, 'pos') else "N/A")
+            logger.error("Full response (first 1000 chars): %s", full_response[:1000])
             if attempt < max_retries:
                 logger.info("Retrying LLM invocation | Attempt=%d/%d", attempt + 1, max_retries)
                 time.sleep(1)  # Wait 1 second before retry
@@ -429,7 +479,7 @@ def invoke_bedrock_agent(query: str, customer_id: str, max_retries: int = LLM_MA
 # Async Search Processing
 # ---------------------------------------------------------------------------
 
-def process_search_async(search_id: str, query: str, customer_id: str, insurance_id: str = None):
+def process_search_async(search_id: str, query: str, customer_id: str, insurance_id: str = None, user_location: dict = None):
     """
     Process search asynchronously in background thread.
     This function invokes LLM and stores the raw LLM response in DynamoDB.
@@ -439,6 +489,7 @@ def process_search_async(search_id: str, query: str, customer_id: str, insurance
         query: User's search query
         customer_id: Customer ID
         insurance_id: User's insurance ID (optional)
+        user_location: User's location {"latitude": float, "longitude": float} (optional)
     """
     try:
         logger.info("Starting async search processing | SearchId=%s", search_id)
@@ -455,23 +506,23 @@ def process_search_async(search_id: str, query: str, customer_id: str, insurance
         # Validate LLM response
         if not llm_response.get("hospitals"):
             logger.warning("LLM returned no hospitals | SearchId=%s", search_id)
-            save_search_results(search_id, "complete", llm_response=llm_response)
+            save_search_results(search_id, "complete", llm_response=llm_response, user_location=user_location)
             return
         
         logger.info("LLM response validated | SearchId=%s | HospitalCount=%d", search_id, len(llm_response.get("hospitals", [])))
         
         # Step 2: Store raw LLM response in DynamoDB
         logger.info("STEP 2: Storing LLM response in DynamoDB | SearchId=%s", search_id)
-        save_search_results(search_id, "complete", llm_response=llm_response)
+        save_search_results(search_id, "complete", llm_response=llm_response, user_location=user_location)
         
         logger.info("Async search processing complete | SearchId=%s", search_id)
     
     except Exception as e:
         logger.exception("Async search processing failed | SearchId=%s", search_id)
-        save_search_results(search_id, "error", error=f"Internal error: {str(e)}")
+        save_search_results(search_id, "error", error=f"Internal error: {str(e)}", user_location=user_location)
 
 
-def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: list, insurance_id: str = None) -> dict:
+def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: list, insurance_id: str = None, user_location: dict = None) -> dict:
     """
     Build enriched hospital object for UI.
     
@@ -480,6 +531,7 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
         hospital_data: Hospital data from API
         reviews: Hospital reviews from API
         insurance_id: User's insurance ID (optional)
+        user_location: User's location {"latitude": float, "longitude": float} (optional)
     
     Returns:
         dict: Enriched hospital object
@@ -546,15 +598,23 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
     
     # Format reviews for UI
     formatted_reviews = []
-    for review in reviews[:2]:  # Only first 2 reviews
+    for review in reviews[:5]:  # Only first 5 reviews
         try:
             payment = review.get("payment") or {}
             claim = review.get("claim") or {}
             
+            # Get rating from backend, use None if not present (will hide stars in UI)
+            rating = review.get("overallRating")
+            if rating is not None:
+                try:
+                    rating = int(rating)
+                except (ValueError, TypeError):
+                    rating = None
+            
             formatted_review = {
                 "id": review.get("reviewId", ""),
-                "patientName": review.get("customerName", "Anonymous"),
-                "rating": review.get("overallRating", 4),
+                "patientName": review.get("customerName", ""),  # Empty string if not present
+                "rating": rating,  # None if not present - UI will hide stars
                 "date": review.get("createdAt", "")[:10] if review.get("createdAt") else "",  # Extract date part
                 "treatment": review.get("procedureType", "General Treatment"),
                 "cost": clean_currency_value(payment.get("totalBillAmount")),
@@ -567,10 +627,70 @@ def build_enriched_hospital(hospital_llm: dict, hospital_data: dict, reviews: li
             logger.warning("Failed to format review | ReviewId=%s | Error=%s", review.get("reviewId"), str(e))
             continue
     
+    # Parse hospital location coordinates from Hospital table
+    hospital_lat, hospital_lon = None, None
+    distance_km = None
+    
+    logger.info("Parsing hospital coordinates | HospitalId=%s | user_location=%s", hospital_id, user_location)
+    
+    # Get location from hospital data (format: "17.4122, 78.4071")
+    hospital_location_str = hospital_data.get("location", "")
+    if hospital_location_str:
+        try:
+            # Location format: "lat, lon" or "17.385044, 78.486671"
+            parts = hospital_location_str.split(",")
+            if len(parts) == 2:
+                hospital_lat = float(parts[0].strip())
+                hospital_lon = float(parts[1].strip())
+                logger.info("Parsed coordinates from hospital data | HospitalId=%s | Lat=%.6f | Lon=%.6f", 
+                           hospital_id, hospital_lat, hospital_lon)
+        except Exception as e:
+            logger.warning("Failed to parse hospital location | HospitalId=%s | Location=%s | Error=%s", 
+                         hospital_id, hospital_location_str, str(e))
+    else:
+        logger.warning("Hospital location field is empty | HospitalId=%s", hospital_id)
+    
+    # Calculate distance if we have both hospital and user coordinates
+    if hospital_lat and hospital_lon and user_location:
+        if "latitude" in user_location and "longitude" in user_location:
+            # Convert Decimal to float if needed (DynamoDB returns Decimal)
+            user_lat = float(user_location["latitude"]) if isinstance(user_location["latitude"], Decimal) else user_location["latitude"]
+            user_lon = float(user_location["longitude"]) if isinstance(user_location["longitude"], Decimal) else user_location["longitude"]
+            
+            logger.info(
+                "Calculating distance | HospitalId=%s | UserLat=%.6f | UserLon=%.6f | HospitalLat=%.6f | HospitalLon=%.6f",
+                hospital_id,
+                user_lat,
+                user_lon,
+                hospital_lat,
+                hospital_lon
+            )
+            
+            distance_km = calculate_distance(user_lat, user_lon, hospital_lat, hospital_lon)
+            
+            if distance_km is not None:
+                logger.info(
+                    "Distance calculated successfully | HospitalId=%s | Distance=%.1f km",
+                    hospital_id,
+                    distance_km
+                )
+            else:
+                logger.warning("Distance calculation returned None | HospitalId=%s", hospital_id)
+        else:
+            logger.warning("User location missing lat/lon | HospitalId=%s | UserLocation=%s", hospital_id, user_location)
+    else:
+        logger.warning("Cannot calculate distance | HospitalId=%s | HospitalLat=%s | HospitalLon=%s | UserLocation=%s", 
+                      hospital_id, hospital_lat, hospital_lon, user_location)
+    
     return {
         "id": hospital_id,
         "name": hospital_data.get("hospitalName", ""),
         "location": location,
+        "coordinates": {
+            "latitude": hospital_lat,
+            "longitude": hospital_lon
+        } if hospital_lat and hospital_lon else None,
+        "distance": distance_km,  # Distance in km (None if not calculated)
         "rating": hospital_data.get("rating", 0),
         "reviewCount": len(reviews),
         "imageUrl": "/default-hospital.jpg",
@@ -1092,12 +1212,14 @@ def search_hospitals(event: dict) -> dict:
         customer_id = body.get("customerId", "").strip()
         user_context = body.get("userContext", {})
         insurance_id = user_context.get("insuranceId")
+        user_location = user_context.get("location")  # Extract user location
         
         logger.info(
-            "Request parsed | Query='%s' | CustomerId=%s | InsuranceId=%s",
+            "Request parsed | Query='%s' | CustomerId=%s | InsuranceId=%s | UserLocation=%s",
             query[:100],
             customer_id or "None",
-            insurance_id or "None"
+            insurance_id or "None",
+            "Yes" if user_location else "No"
         )
         
         # Validate required fields
@@ -1109,8 +1231,8 @@ def search_hospitals(event: dict) -> dict:
         search_id = f"search_{int(time.time())}_{request_id}"
         logger.info("Generated searchId | SearchId=%s", search_id)
         
-        # Save initial status
-        save_search_results(search_id, "processing")
+        # Save initial status with user location
+        save_search_results(search_id, "processing", user_location=user_location)
         
         # Invoke Lambda asynchronously to process search
         function_name = os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
@@ -1120,7 +1242,8 @@ def search_hospitals(event: dict) -> dict:
             "searchId": search_id,
             "query": query,
             "customerId": customer_id,
-            "insuranceId": insurance_id
+            "insuranceId": insurance_id,
+            "userLocation": user_location  # Pass user location
         }
         
         try:
@@ -1209,6 +1332,18 @@ def get_search_status(event: dict) -> dict:
         # If complete, enrich and return results
         if status == "complete":
             llm_response = item.get("llmResponse", {})
+            user_location = item.get("userLocation")  # Extract user location from DynamoDB
+            
+            # Convert Decimal to float for user_location (DynamoDB stores as Decimal)
+            if user_location and isinstance(user_location, dict):
+                if "latitude" in user_location:
+                    user_location["latitude"] = float(user_location["latitude"])
+                if "longitude" in user_location:
+                    user_location["longitude"] = float(user_location["longitude"])
+                logger.info("User location retrieved | Lat=%.3f | Lon=%.3f", 
+                           user_location.get("latitude", 0), user_location.get("longitude", 0))
+            else:
+                logger.warning("User location not found in DynamoDB | SearchId=%s", search_id)
             
             if not llm_response:
                 logger.error("LLM response missing | SearchId=%s", search_id)
@@ -1218,7 +1353,8 @@ def get_search_status(event: dict) -> dict:
             hospitals_llm = llm_response.get("hospitals", [])
             hospital_ids = list(set([h["hospitalId"] for h in hospitals_llm]))
             
-            logger.info("Enriching hospitals on-the-fly | SearchId=%s | Count=%d", search_id, len(hospital_ids))
+            logger.info("Enriching hospitals on-the-fly | SearchId=%s | Count=%d | UserLocation=%s", 
+                       search_id, len(hospital_ids), "Yes" if user_location else "No")
             
             # Log first hospital structure for debugging
             if hospitals_llm:
@@ -1249,7 +1385,7 @@ def get_search_status(event: dict) -> dict:
                     futures[future] = ("hospital", hospital_id)
                 
                 for hospital_id in hospital_ids:
-                    future = executor.submit(fetch_reviews, {"hospitalId": hospital_id, "limit": 2})
+                    future = executor.submit(fetch_reviews, {"hospitalId": hospital_id, "limit": 5})
                     futures[future] = ("hospital_reviews", hospital_id)
                 
                 for future in as_completed(futures):
@@ -1289,7 +1425,8 @@ def get_search_status(event: dict) -> dict:
                     hospital_llm,
                     hospital_data,
                     reviews,
-                    None  # insurance_id not available here
+                    None,  # insurance_id not available here
+                    user_location  # Pass user location for distance calculation
                 )
                 
                 enriched_hospitals.append(enriched_hospital)
@@ -1482,9 +1619,10 @@ def lambda_handler(event: dict, context: Any) -> dict:
         query = event.get("query")
         customer_id = event.get("customerId")
         insurance_id = event.get("insuranceId")
+        user_location = event.get("userLocation")  # Extract user location
         
         logger.info("Async search processing invocation | SearchId=%s", search_id)
-        process_search_async(search_id, query, customer_id, insurance_id)
+        process_search_async(search_id, query, customer_id, insurance_id, user_location)
         return None  # No response needed for async invocation
     
     # Regular API Gateway routing

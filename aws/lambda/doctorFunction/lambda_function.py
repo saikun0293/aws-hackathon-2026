@@ -15,11 +15,12 @@ Environment variables (required):
 
 Doctor schema
 -------------
-  doctorId   (PK, String)
-  doctorName (String)
-  about      (String)
-  records    (List)
-  createdAt  (String, ISO-8601 datetime)
+  doctorId      (PK, String)
+  doctorName    (String)
+  departmentId  (String) - which department the doctor belongs to
+  about         (String)
+  records       (List)
+  createdAt     (String, ISO-8601 datetime)
 """
 
 from __future__ import annotations
@@ -60,6 +61,8 @@ class DecimalEncoder(json.JSONEncoder):
     def default(self, obj: Any) -> Any:
         if isinstance(obj, Decimal):
             return int(obj) if obj % 1 == 0 else float(obj)
+        if isinstance(obj, set):
+            return list(obj)  # Convert sets to lists for JSON serialization
         return super().default(obj)
 
 
@@ -103,7 +106,7 @@ def create_doctor(event: dict) -> dict:
     """
     POST /doctors
     Creates a new doctor record.
-    Body fields: doctorName*, about (optional), records (optional list)
+    Body fields: doctorName*, departmentId (optional), about (optional), records (optional list)
     doctorId and createdAt are generated server-side.
     """
     try:
@@ -122,6 +125,7 @@ def create_doctor(event: dict) -> dict:
     item = {
         PARTITION_KEY: doctor_id,
         "doctorName": body["doctorName"],
+        "departmentId": body.get("departmentId", ""),
         "about": body.get("about", ""),
         "records": body.get("records", []),
         "createdAt": created_at,
@@ -182,6 +186,13 @@ def list_doctors(event: dict) -> dict:
         limit = 20
 
     scan_kwargs: dict[str, Any] = {"Limit": limit}
+    
+    # Filter by departmentId if provided
+    department_id = query_params.get("departmentId")
+    if department_id:
+        scan_kwargs["FilterExpression"] = "departmentId = :deptId"
+        scan_kwargs["ExpressionAttributeValues"] = {":deptId": department_id}
+        logger.info("Filtering doctors by departmentId: %s", department_id)
 
     last_key_raw = query_params.get("lastKey")
     if last_key_raw:
@@ -212,7 +223,7 @@ def update_doctor(event: dict) -> dict:
     """
     PUT /doctors/{doctorId}
     Partially updates mutable fields of an existing doctor.
-    Updatable fields: doctorName, about, records
+    Updatable fields: doctorName, departmentId, about, records
     """
     doctor_id = _get_doctor_id(event)
     if not doctor_id:
@@ -226,7 +237,7 @@ def update_doctor(event: dict) -> dict:
     if not body:
         return _error(400, "Request body must not be empty.")
 
-    UPDATABLE = {"doctorName", "about", "records"}
+    UPDATABLE = {"doctorName", "departmentId", "about", "records"}
     updates = {k: v for k, v in body.items() if k in UPDATABLE}
 
     if not updates:

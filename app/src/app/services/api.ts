@@ -51,6 +51,9 @@ function adaptEnrichedHospitalToHospital(enriched: any): Hospital {
       : 0,
     topDoctorIds: Array.isArray(enriched.topDoctorIds) ? enriched.topDoctorIds : [],
     doctorAIReviews: enriched.doctorAIReviews || {},
+    // Location and distance fields
+    coordinates: enriched.coordinates || undefined,
+    distance: typeof enriched.distance === 'number' ? enriched.distance : undefined,
   };
 }
 
@@ -73,14 +76,68 @@ function adaptEnrichedDoctorToDoctor(enriched: any): Doctor {
 }
 
 /**
+ * Get user's current location using browser geolocation API
+ */
+async function getUserLocation(): Promise<{ latitude: number; longitude: number } | null> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      console.warn("[API] Geolocation not supported");
+      resolve(null);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const location = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        };
+        console.log("[API] User location obtained:", location);
+        resolve(location);
+      },
+      (error) => {
+        console.warn("[API] Failed to get user location:", error.message);
+        resolve(null); // Don't fail the search if location is unavailable
+      },
+      {
+        timeout: 5000,
+        maximumAge: 300000, // Cache for 5 minutes
+      }
+    );
+  });
+}
+
+/**
  * Call the real Lambda search endpoint (async flow)
  * Step 1: Initiate search and get searchId
  */
 async function initiateSearch(query: string, customerId?: string): Promise<{ searchId: string; status: string }> {
+  // Get user location
+  const userLocation = await getUserLocation();
+  
+  // Replace "near me" with "in Hyderabad" since Agent doesn't use userContext location
+  // This must be done BEFORE checking hasLocation
+  let enhancedQuery = query.replace(/\bnear\s+me\b/i, 'in Hyderabad');
+  
+  // If query doesn't mention a location, append "in Hyderabad" as default
+  const hasLocation = /\b(in|near|at|around)\s+\w+/i.test(enhancedQuery) || 
+                      /hyderabad|bangalore|mumbai|delhi|chennai|kolkata/i.test(enhancedQuery);
+  
+  if (!hasLocation) {
+    enhancedQuery = `${enhancedQuery} in Hyderabad`;
+    console.log(`[API] No location detected, enhanced query: "${enhancedQuery}"`);
+  }
+  
+  if (enhancedQuery !== query) {
+    console.log(`[API] Query enhanced: "${query}" → "${enhancedQuery}"`);
+  }
+
   const requestBody = {
-    query,
+    query: enhancedQuery,
     customerId: customerId || "anonymous",
-    userContext: {},
+    userContext: {
+      location: userLocation, // Pass user location to backend
+    },
   };
 
   console.log(`[API] Initiating search: ${SEARCH_ENDPOINT}`);
@@ -139,10 +196,21 @@ async function pollSearchStatus(searchId: string, maxAttempts: number = 30): Pro
       
       return {
         success: true,
+        cached: false,
+        responseTime: "0ms",
+        userIntent: {
+          category: "hospital_search",
+          keywords: [],
+        },
         results: {
           aiSummary: data.results.aiSummary || "",
           hospitals: data.results.hospitals || [],
           totalMatches: (data.results.hospitals || []).length,
+        },
+        metadata: {
+          searchId: searchId,
+          timestamp: new Date().toISOString(),
+          aiModel: "bedrock",
         },
       };
     }

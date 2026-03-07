@@ -1,10 +1,11 @@
 import { useParams, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { ArrowLeft, MapPin, Star, DollarSign, Shield, Phone, Clock, ChevronRight } from "lucide-react";
+import { ArrowLeft, MapPin, Star, DollarSign, Shield, Phone, Clock, ChevronRight, CheckCircle, XCircle, Navigation } from "lucide-react";
 import { motion } from "motion/react";
 import { Hospital, Doctor } from "../data/mockData";
 import { getHospitalByIdAPI } from "../services/api";
 import { DoctorCard } from "../components/DoctorCard";
+import { HospitalMap } from "../components/HospitalMap";
 import ReactMarkdown from "react-markdown";
 import { useSearch } from "../contexts/SearchContext";
 
@@ -17,7 +18,25 @@ export function HospitalDetail() {
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [expandedReviews, setExpandedReviews] = useState<Set<string>>(new Set());
   const [acceptedInsurance, setAcceptedInsurance] = useState<string[]>([]);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const { getHospitalById, searchId } = useSearch();
+
+  // Get user location on mount
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+        },
+        (error) => {
+          console.warn("Failed to get user location:", error);
+        }
+      );
+    }
+  }, []);
 
   const toggleReviewExpansion = (reviewId: string) => {
     setExpandedReviews(prev => {
@@ -134,7 +153,7 @@ export function HospitalDetail() {
               const doctorAIReviews = contextHospital.doctorAIReviews || {};
               console.log("[HospitalDetail] Using doctorAIReviews mapping:", doctorAIReviews);
               
-              // Fetch each doctor's details from the Doctor API
+              // Fetch doctors from LLM recommendations
               const doctorPromises = contextHospital.topDoctorIds.map(async (doctorId: string) => {
                 try {
                   // Fetch doctor data
@@ -163,8 +182,17 @@ export function HospitalDetail() {
                   }
                   
                   // Get AI review for this doctor
-                  const aiReview = doctorAIReviews[doctorId] || "";
+                  let aiReview = doctorAIReviews[doctorId] || "";
                   console.log(`[HospitalDetail] Doctor ${doctorId} AI review:`, aiReview ? "Found" : "EMPTY");
+                  
+                  // Replace doctor ID with actual doctor name in AI review
+                  // LLM sometimes uses "Dr. doctor_xyz" format, replace with actual name
+                  const doctorName = doctorData.doctorName || "Unknown Doctor";
+                  if (aiReview && doctorId) {
+                    // Replace patterns like "Dr. doctor_xyz" or "doctor_xyz" with actual name
+                    aiReview = aiReview.replace(new RegExp(`Dr\\.?\\s*${doctorId}`, 'gi'), doctorName);
+                    aiReview = aiReview.replace(new RegExp(doctorId, 'gi'), doctorName);
+                  }
                   
                   // Extract qualifications from 'about' field since Doctor table doesn't have qualifications field
                   const qualifications: string[] = [];
@@ -190,7 +218,7 @@ export function HospitalDetail() {
                   // Transform to UI format
                   return {
                     id: doctorData.doctorId,
-                    name: doctorData.doctorName || "Unknown Doctor",
+                    name: doctorName,
                     specialty: doctorData.specialty || "General",
                     experience: doctorData.yearsOfExperience || 10,
                     qualifications: qualifications,
@@ -198,6 +226,7 @@ export function HospitalDetail() {
                     reviewCount: reviewCount,  // Use fetched review count
                     imageUrl: "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=200",  // Use real image URL
                     aiSummary: aiReview, // Use AI review from hospital object
+                    about: about,  // Add doctor description
                     reviews: [],
                   };
                 } catch (error) {
@@ -206,8 +235,132 @@ export function HospitalDetail() {
                 }
               });
               
-              const fetchedDoctors = (await Promise.all(doctorPromises)).filter(d => d !== null);
-              console.log("[HospitalDetail] Fetched doctors:", fetchedDoctors.length);
+              let fetchedDoctors = (await Promise.all(doctorPromises)).filter(d => d !== null);
+              console.log("[HospitalDetail] Fetched doctors from LLM:", fetchedDoctors.length);
+              
+              // If less than 3 doctors, fetch additional doctors from hospital departments
+              if (fetchedDoctors.length < 3) {
+                console.log("[HospitalDetail] Less than 3 doctors, fetching additional from hospital departments");
+                try {
+                  // Fetch hospital data to get department IDs
+                  const hospitalResponse = await fetch(
+                    `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/hospitals/${id}`
+                  );
+                  if (hospitalResponse.ok) {
+                    const hospitalData = await hospitalResponse.json();
+                    const departmentIds = hospitalData.departmentIds || [];
+                    console.log("[HospitalDetail] Hospital has departments:", departmentIds);
+                    
+                    // Fetch doctors for each department using departmentId query parameter
+                    const allDoctorIds: string[] = [];
+                    for (const deptId of departmentIds) {
+                      try {
+                        const doctorsResponse = await fetch(
+                          `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/doctors?departmentId=${deptId}&limit=100`
+                        );
+                        if (doctorsResponse.ok) {
+                          const doctorsData = await doctorsResponse.json();
+                          const deptDoctorIds = (doctorsData.items || []).map((d: any) => d.doctorId);
+                          allDoctorIds.push(...deptDoctorIds);
+                          console.log(`[HospitalDetail] Department ${deptId} has ${deptDoctorIds.length} doctors`);
+                        }
+                      } catch (error) {
+                        console.warn(`Failed to fetch doctors for department ${deptId}:`, error);
+                      }
+                    }
+                    
+                    console.log("[HospitalDetail] Total doctors from all departments:", allDoctorIds.length);
+                    
+                    // Filter out doctors we already have
+                    const existingDoctorIds = new Set(fetchedDoctors.map(d => d.id));
+                    const additionalDoctorIds = allDoctorIds.filter((did: string) => !existingDoctorIds.has(did));
+                    
+                    console.log("[HospitalDetail] Fetching additional doctors to sort:", additionalDoctorIds.length);
+                    
+                    // Fetch ALL additional doctors (so we can sort them)
+                    const additionalPromises = additionalDoctorIds.map(async (doctorId: string) => {
+                      try {
+                        const doctorResponse = await fetch(
+                          `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/doctors/${doctorId}`
+                        );
+                        if (!doctorResponse.ok) return null;
+                        
+                        const doctorData = await doctorResponse.json();
+                        
+                        // Fetch review count
+                        let reviewCount = 0;
+                        try {
+                          const reviewsResponse = await fetch(
+                            `https://ri8zkgmzlb.execute-api.us-east-1.amazonaws.com/reviews?doctorId=${doctorId}&limit=100`
+                          );
+                          if (reviewsResponse.ok) {
+                            const reviewsData = await reviewsResponse.json();
+                            reviewCount = reviewsData.count || 0;
+                          }
+                        } catch (error) {
+                          console.warn(`Failed to fetch reviews for additional doctor ${doctorId}:`, error);
+                        }
+                        
+                        // Extract qualifications
+                        const qualifications: string[] = [];
+                        const about = doctorData.about || "";
+                        const qualMatches = about.match(/\b(MBBS|MD|MS|MCh|DM|DNB|FRCS|MRCP|PhD|Fellowship|Board Certified)\b/gi);
+                        if (qualMatches) {
+                          const seen = new Set<string>();
+                          for (const qual of qualMatches) {
+                            const upper = qual.toUpperCase();
+                            if (!seen.has(upper) && qualifications.length < 5) {
+                              seen.add(upper);
+                              qualifications.push(upper);
+                            }
+                          }
+                        }
+                        
+                        return {
+                          id: doctorData.doctorId,
+                          name: doctorData.doctorName || "Unknown Doctor",
+                          specialty: doctorData.specialty || "General",
+                          experience: doctorData.yearsOfExperience || 10,
+                          qualifications: qualifications,
+                          rating: doctorData.rating || 4.5,
+                          reviewCount: reviewCount,
+                          imageUrl: "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=200",
+                          aiSummary: "",  // No AI review for additional doctors
+                          about: about,
+                          reviews: [],
+                        };
+                      } catch (error) {
+                        console.error(`Error fetching additional doctor ${doctorId}:`, error);
+                        return null;
+                      }
+                    });
+                    
+                    let additionalDoctors = (await Promise.all(additionalPromises)).filter(d => d !== null);
+                    
+                    // Sort by rating (descending) and review count (descending) to get top doctors
+                    additionalDoctors.sort((a, b) => {
+                      // First sort by rating
+                      if (b.rating !== a.rating) {
+                        return b.rating - a.rating;
+                      }
+                      // If ratings are equal, sort by review count
+                      return b.reviewCount - a.reviewCount;
+                    });
+                    
+                    // Take only the top doctors we need to reach 3 total
+                    const neededCount = 3 - fetchedDoctors.length;
+                    additionalDoctors = additionalDoctors.slice(0, neededCount);
+                    
+                    console.log("[HospitalDetail] Selected top additional doctors:", additionalDoctors.length);
+                    fetchedDoctors = [...fetchedDoctors, ...additionalDoctors];
+                    console.log("[HospitalDetail] Total doctors after adding additional:", fetchedDoctors.length);
+                  }
+                } catch (error) {
+                  console.error("[HospitalDetail] Failed to fetch additional doctors:", error);
+                }
+              }
+              
+              console.log("[HospitalDetail] Final doctor count:", fetchedDoctors.length);
               console.log("[HospitalDetail] Doctors with AI reviews:", fetchedDoctors.filter(d => d.aiSummary).length);
               setDoctors(fetchedDoctors);
             } catch (error) {
@@ -451,23 +604,33 @@ export function HospitalDetail() {
                   return (
                     <div key={review.id} className="border-b border-gray-200 last:border-0 pb-4 last:pb-0">
                       <div className="flex items-center gap-3 mb-2">
-                        <div className="flex">
-                          {[...Array(5)].map((_, i) => (
-                            <Star
-                              key={i}
-                              className={`w-4 h-4 ${
-                                i < review.rating
-                                  ? "fill-yellow-400 text-yellow-400"
-                                  : "text-gray-300"
-                              }`}
-                            />
-                          ))}
-                        </div>
-                        <span className="font-medium text-gray-900">{review.patientName}</span>
-                        {review.verified && (
-                          <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-medium">
-                            Verified Patient
-                          </span>
+                        {review.rating != null && review.rating > 0 && (
+                          <div className="flex">
+                            {[...Array(5)].map((_, i) => (
+                              <Star
+                                key={i}
+                                className={`w-4 h-4 ${
+                                  i < (review.rating || 0)
+                                    ? "fill-yellow-400 text-yellow-400"
+                                    : "text-gray-300"
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {review.patientName && review.patientName !== "Anonymous" && (
+                          <span className="font-medium text-gray-900">{review.patientName}</span>
+                        )}
+                        {review.verified ? (
+                          <div className="flex items-center gap-1 bg-green-50 text-green-700 px-2 py-1 rounded">
+                            <CheckCircle className="w-3.5 h-3.5" />
+                            <span className="text-xs font-medium">Verified Patient</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 bg-red-50 text-red-700 px-2 py-1 rounded">
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span className="text-xs font-medium">Unverified</span>
+                          </div>
                         )}
                         <span className="text-sm text-gray-500 ml-auto">{review.date}</span>
                       </div>
@@ -511,10 +674,60 @@ export function HospitalDetail() {
           {/* Sidebar */}
           <div className="lg:col-span-1">
             <div className="sticky top-6 space-y-4">
+              {/* Location & Map */}
+              {hospital.coordinates && (
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="bg-white rounded-lg border border-gray-200 p-6"
+                >
+                  <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    <MapPin className="w-5 h-5 text-blue-600" />
+                    Location & Directions
+                  </h3>
+                  
+                  {/* Map Container */}
+                  <div className="h-64 rounded-lg overflow-hidden mb-3 border">
+                    <HospitalMap
+                      userLocation={userLocation || undefined}
+                      hospitalLocation={hospital.coordinates}
+                      hospitalName={hospital.name}
+                    />
+                  </div>
+                  
+                  {/* Distance Info */}
+                  {hospital.distance && (
+                    <div className="text-sm space-y-2 mb-3">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Distance:</span>
+                        <span className="font-semibold">{hospital.distance.toFixed(1)} km</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Est. Time:</span>
+                        <span className="font-semibold">{Math.ceil(hospital.distance / 0.5)} min</span>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <button 
+                    onClick={() => {
+                      // The map already shows the direction between two points!
+                      // Just show a helpful message
+                      alert(`The map above shows the route from your location to ${hospital.name}\n\nDistance: ${hospital.distance?.toFixed(1)} km\nEstimated Time: ${hospital.distance ? Math.ceil(hospital.distance / 0.5) : 'N/A'} min`);
+                    }}
+                    className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
+                  >
+                    <Navigation className="w-4 h-4" />
+                    View Route Info
+                  </button>
+                </motion.div>
+              )}
+
               {/* Insurance Accepted */}
               <motion.div
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.1 }}
                 className="bg-white rounded-lg border border-gray-200 p-6"
               >
                 <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
